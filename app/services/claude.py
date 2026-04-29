@@ -16,22 +16,29 @@ JSON schema:
     {{
       "layout": "hero|bullets|two_column|data_table",
       "title": "string — maximum 10 words",
-      "bullets": ["string — maximum 15 words each"],
+      "bullets": ["string"],
       "speaker_notes": "string — 50 to 150 words"
     }}
   ]
 }}
 
+LAYOUT SELECTION — choose based on slide content:
+- hero: ONLY the first slide. Large title + subtitle. bullets[0] = subtitle/tagline.
+- data_table: when content has metrics, statistics, specifications, key-value data, feature lists with values, or any structured label-value information. Format EVERY bullet as "Label: Value" (e.g. "Total Users: 1,200", "Revenue: $5.2M", "Status: Completed"). Minimum 4 rows.
+- two_column: when comparing two things side-by-side — pros vs cons, before vs after, features vs benefits, two phases, two teams, two options. First half of bullets = left column, second half = right column. Use equal numbers of bullets on each side.
+- bullets: all other content — processes, steps, explanations, descriptions, narrative content.
+
 RULES:
-1. First slide MUST be hero layout (presentation title)
-2. Second slide MUST be bullets layout (agenda)
-3. Title: strictly maximum 10 words
-4. Bullets: minimum 3, maximum 6 per slide
-5. Each bullet: maximum 15 words
-6. Speaker notes: 50-150 words
-7. Style: {STYLE}
-8. Audience: {AUDIENCE_LEVEL}
-9. Total slides: approximately {SLIDE_COUNT}\
+1. First slide MUST be hero layout
+2. Use data_table for at least 1-2 slides if document has any metrics or structured data
+3. Use two_column for at least 1 slide if document has comparisons or two-sided content
+4. Title: strictly maximum 10 words
+5. Bullets: minimum 3, maximum 6 per slide (for data_table: minimum 4, maximum 7)
+6. Each bullet: maximum 15 words
+7. Speaker notes: 50-150 words
+8. Style: {STYLE}
+9. Audience: {AUDIENCE_LEVEL}
+10. Total slides: approximately {SLIDE_COUNT}\
 """
 
 

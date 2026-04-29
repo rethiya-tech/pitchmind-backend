@@ -31,8 +31,10 @@ class ConversionCreate(BaseModel):
     @field_validator("slide_count")
     @classmethod
     def validate_slide_count(cls, v: int) -> int:
-        if not 3 <= v <= 30:
-            raise ValueError("slide_count must be between 3 and 30")
+        if v <= 3:
+            raise ValueError("slide_count must be greater than 3")
+        if v > 50:
+            raise ValueError("slide_count must not exceed 50")
         return v
 
 
