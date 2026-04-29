@@ -128,6 +128,154 @@ def _add_textbox(slide: Any, text: str, x: int, y: int, w: int, h: int,
     run.font.name = font
 
 
+def _lighter(hex_color: str, amount: int = 30) -> str:
+    h = hex_color.lstrip("#")
+    r = min(255, max(0, int(h[0:2], 16) + amount))
+    g = min(255, max(0, int(h[2:4], 16) + amount))
+    b = min(255, max(0, int(h[4:6], 16) + amount))
+    return f"#{r:02X}{g:02X}{b:02X}"
+
+
+def _add_bullet_column(sl: Any, bullets: list[str], x: int, y: int, w: int, h: int,
+                       theme: Any, font: str = "Plus Jakarta Sans") -> None:
+    """Add a column of bullet points as a textbox."""
+    cb = sl.shapes.add_textbox(Emu(x), Emu(y), Emu(w), Emu(h))
+    _clear_textbox_border(cb)
+    ctf = cb.text_frame
+    ctf.word_wrap = True
+    for j, bullet in enumerate(bullets):
+        cp = ctf.paragraphs[0] if j == 0 else ctf.add_paragraph()
+        dot = cp.add_run()
+        dot.text = "● "
+        dot.font.size = Pt(9)
+        dot.font.color.rgb = _rgb(theme.accent)
+        dot.font.name = font
+        txt = cp.add_run()
+        txt.text = bullet
+        txt.font.size = Pt(13)
+        txt.font.color.rgb = _rgb(theme.text)
+        txt.font.name = font
+
+
+# ── layout renderers ──────────────────────────────────────────────────────────
+
+def _render_common_header(sl: Any, theme: Any, slide_idx: int, sid: int) -> None:
+    """Shared header band + slide number chip."""
+    num_w = 457200
+    _add_solid_rect(sl, 0, 0, SLIDE_W, HEADER_H, theme.accent, sid)
+    _add_solid_rect(sl, SLIDE_W - num_w, 0, num_w, HEADER_H, theme.accent, sid + 1)
+    _add_textbox(sl, str(slide_idx + 1), SLIDE_W - num_w, 0, num_w, HEADER_H,
+                 size_pt=10, bold=True, hex_color="#FFFFFF")
+
+
+def _render_common_footer(sl: Any, theme: Any, sid: int) -> None:
+    _add_solid_rect(sl, 0, FOOTER_Y, SLIDE_W, FOOTER_H, theme.accent, sid)
+    _add_textbox(sl, "PitchMind", TITLE_X, FOOTER_Y, 2000000, FOOTER_H,
+                 size_pt=8, bold=False, hex_color="#FFFFFF")
+
+
+def _render_hero(sl: Any, slide: Any, theme: Any, sid: int) -> None:
+    # No header band — full background
+    _add_textbox(sl, slide.title or "", TITLE_X, 1100000, TITLE_W, 1600000,
+                 size_pt=38, bold=True, hex_color="#FFFFFF")
+    _add_solid_rect(sl, TITLE_X, 2800000, DIVIDER_W * 2, DIVIDER_H * 2, theme.accent, sid)
+    subtitle = slide.bullets[0] if slide.bullets else ""
+    if subtitle:
+        _add_textbox(sl, subtitle, TITLE_X, 2950000, TITLE_W, 700000,
+                     size_pt=18, bold=False, hex_color=theme.text)
+    _render_common_footer(sl, theme, sid + 1)
+
+
+def _render_bullets(sl: Any, slide: Any, theme: Any, sid: int, slide_idx: int) -> None:
+    _render_common_header(sl, theme, slide_idx, sid)
+    _add_textbox(sl, slide.title or "", TITLE_X, TITLE_Y, TITLE_W, TITLE_H,
+                 size_pt=28, bold=True, hex_color=theme.text)
+    _add_solid_rect(sl, TITLE_X, DIVIDER_Y, DIVIDER_W, DIVIDER_H, theme.accent, sid + 2)
+    bullets = slide.bullets if slide.bullets else []
+    if bullets:
+        _add_bullet_column(sl, bullets, TITLE_X, BULLETS_Y, TITLE_W, BULLETS_H, theme)
+    _render_common_footer(sl, theme, sid + 3)
+    if slide.speaker_notes:
+        sl.notes_slide.notes_text_frame.text = slide.speaker_notes
+
+
+def _render_two_column(sl: Any, slide: Any, theme: Any, sid: int, slide_idx: int) -> None:
+    _render_common_header(sl, theme, slide_idx, sid)
+    _add_textbox(sl, slide.title or "", TITLE_X, TITLE_Y, TITLE_W, TITLE_H,
+                 size_pt=24, bold=True, hex_color=theme.text)
+    _add_solid_rect(sl, TITLE_X, DIVIDER_Y, DIVIDER_W, DIVIDER_H, theme.accent, sid + 2)
+
+    bullets = slide.bullets if slide.bullets else []
+    mid = (len(bullets) + 1) // 2
+    left_bullets = bullets[:mid]
+    right_bullets = bullets[mid:]
+
+    gap = 228600
+    col_w = (TITLE_W - gap) // 2
+    right_x = TITLE_X + col_w + gap
+
+    # Column header strips
+    col_hdr_h = 228600
+    col_content_y = BULLETS_Y + col_hdr_h + 60000
+    col_content_h = BULLETS_H - col_hdr_h - 60000
+
+    _add_solid_rect(sl, TITLE_X, BULLETS_Y, col_w, col_hdr_h, theme.accent, sid + 3)
+    _add_textbox(sl, "Key Points", TITLE_X + 80000, BULLETS_Y, col_w - 160000, col_hdr_h,
+                 size_pt=9, bold=True, hex_color="#FFFFFF")
+
+    _add_solid_rect(sl, right_x, BULLETS_Y, col_w, col_hdr_h, _lighter(theme.accent, 20), sid + 4)
+    _add_textbox(sl, "Details", right_x + 80000, BULLETS_Y, col_w - 160000, col_hdr_h,
+                 size_pt=9, bold=True, hex_color="#FFFFFF")
+
+    if left_bullets:
+        _add_bullet_column(sl, left_bullets, TITLE_X, col_content_y, col_w, col_content_h, theme)
+    if right_bullets:
+        _add_bullet_column(sl, right_bullets, right_x, col_content_y, col_w, col_content_h, theme)
+
+    _render_common_footer(sl, theme, sid + 5)
+    if slide.speaker_notes:
+        sl.notes_slide.notes_text_frame.text = slide.speaker_notes
+
+
+def _render_data_table(sl: Any, slide: Any, theme: Any, sid: int, slide_idx: int) -> None:
+    _render_common_header(sl, theme, slide_idx, sid)
+    _add_textbox(sl, slide.title or "", TITLE_X, TITLE_Y, TITLE_W, 900000,
+                 size_pt=24, bold=True, hex_color=theme.text)
+
+    bullets = slide.bullets if slide.bullets else []
+    table_y = 1750000
+    row_h = 330000
+    gap = 18000
+    label_w = int(TITLE_W * 0.38)
+    value_w = TITLE_W - label_w
+    padding = 70000
+
+    value_bg = _lighter(theme.bg, 35)
+
+    base_sid = sid + 2
+    for i, bullet in enumerate(bullets):
+        if ': ' in bullet:
+            label, value = bullet.split(': ', 1)
+        else:
+            label, value = bullet, ""
+
+        y = table_y + i * (row_h + gap)
+        label_bg = theme.accent if i % 2 == 0 else _lighter(theme.accent, 25)
+
+        _add_solid_rect(sl, TITLE_X, y, label_w, row_h, label_bg, base_sid + i * 4)
+        _add_textbox(sl, label, TITLE_X + padding, y + padding // 3, label_w - padding * 2, row_h - padding // 2,
+                     size_pt=11, bold=True, hex_color="#FFFFFF")
+
+        _add_solid_rect(sl, TITLE_X + label_w, y, value_w, row_h, value_bg, base_sid + i * 4 + 1)
+        _add_textbox(sl, value or "—", TITLE_X + label_w + padding, y + padding // 3,
+                     value_w - padding * 2, row_h - padding // 2,
+                     size_pt=11, bold=False, hex_color=theme.text)
+
+    _render_common_footer(sl, theme, base_sid + len(bullets) * 4)
+    if slide.speaker_notes:
+        sl.notes_slide.notes_text_frame.text = slide.speaker_notes
+
+
 # ── main builder ──────────────────────────────────────────────────────────────
 
 def _purge_spTree(element: Any, label: str) -> None:
@@ -220,67 +368,24 @@ def build_pptx(slides: list[Any], theme: Theme) -> bytes:
             etree.SubElement(xfrm, qn("a:chOff"), x="0", y="0")
             etree.SubElement(xfrm, qn("a:chExt"), cx=str(SLIDE_W), cy=str(SLIDE_H))
 
-        # Add all solid rects first so python-pptx's auto-ID counter starts
-        # above our manually-assigned IDs and we never get duplicate shape IDs.
+        # 1. Background — image if available, else solid color
+        bg_path = theme.bg_image_path()
+        if bg_path:
+            sl.shapes.add_picture(bg_path, Emu(0), Emu(0), Emu(SLIDE_W), Emu(SLIDE_H))
+        else:
+            _set_background(sl, theme.bg)
+
         sid = slide_idx * 20 + 10
-        num_w = 457200  # 0.5 in — slide number chip width
+        layout = getattr(slide, 'layout', 'bullets') or 'bullets'
 
-        # 1. Background
-        _set_background(sl, theme.bg)
-
-        # 2–5. All coloured rectangles (header, slide-number bg, divider, footer)
-        _add_solid_rect(sl, 0, 0, SLIDE_W, HEADER_H, theme.accent, sid)
-        _add_solid_rect(sl, SLIDE_W - num_w, 0, num_w, HEADER_H, theme.accent, sid + 1)
-        _add_solid_rect(sl, TITLE_X, DIVIDER_Y, DIVIDER_W, DIVIDER_H, theme.accent, sid + 2)
-        _add_solid_rect(sl, 0, FOOTER_Y, SLIDE_W, FOOTER_H, theme.accent, sid + 3)
-
-        # 6. Slide number text
-        _add_textbox(
-            sl, str(slide_idx + 1),
-            SLIDE_W - num_w, 0, num_w, HEADER_H,
-            size_pt=10, bold=True, hex_color="#FFFFFF",
-        )
-
-        # 7. Title
-        _add_textbox(
-            sl, slide.title or "",
-            TITLE_X, TITLE_Y, TITLE_W, TITLE_H,
-            size_pt=28, bold=True, hex_color=theme.text,
-        )
-
-        # 8. Bullet points
-        bullets: list[str] = slide.bullets if slide.bullets else []
-        if bullets:
-            cb = sl.shapes.add_textbox(
-                Emu(TITLE_X), Emu(BULLETS_Y), Emu(TITLE_W), Emu(BULLETS_H),
-            )
-            _clear_textbox_border(cb)
-            ctf = cb.text_frame
-            ctf.word_wrap = True
-            for j, bullet in enumerate(bullets):
-                cp = ctf.paragraphs[0] if j == 0 else ctf.add_paragraph()
-                dot = cp.add_run()
-                dot.text = "● "
-                dot.font.size = Pt(9)
-                dot.font.color.rgb = _rgb(theme.accent)
-                dot.font.name = "Plus Jakarta Sans"
-
-                txt = cp.add_run()
-                txt.text = bullet
-                txt.font.size = Pt(15)
-                txt.font.color.rgb = _rgb(theme.text)
-                txt.font.name = "Plus Jakarta Sans"
-
-        # 9. Footer text
-        _add_textbox(
-            sl, "PitchMind",
-            TITLE_X, FOOTER_Y, 2000000, FOOTER_H,
-            size_pt=8, bold=False, hex_color="#FFFFFF",
-        )
-
-        # 8. Speaker notes
-        if slide.speaker_notes:
-            sl.notes_slide.notes_text_frame.text = slide.speaker_notes
+        if layout == 'hero':
+            _render_hero(sl, slide, theme, sid)
+        elif layout == 'two_column':
+            _render_two_column(sl, slide, theme, sid, slide_idx)
+        elif layout == 'data_table':
+            _render_data_table(sl, slide, theme, sid, slide_idx)
+        else:
+            _render_bullets(sl, slide, theme, sid, slide_idx)
 
     buf = io.BytesIO()
     prs.save(buf)
