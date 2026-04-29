@@ -17,8 +17,8 @@ from app.core.security import (
 from app.dependencies.db import get_db
 from app.models.user import User
 from app.models.user import User as RefreshTokenModel  # same file re-import clarity
-from app.models.audit_log import AuditLog
 from app.schemas.auth import RegisterRequest, RegisterResponse, TokenResponse, UserOut, ChangePasswordRequest
+from app.services.audit import log_event
 from app.dependencies.auth import get_current_user
 from app.core.config import get_settings
 
@@ -29,7 +29,7 @@ from app.models import user  # noqa: ensure models registered
 
 
 async def _create_refresh_token(db: AsyncSession, user_id: uuid.UUID) -> str:
-    from app.models.audit_log import AuditLog  # noqa: local import
+
 
     # Import inline to avoid circular
     from sqlalchemy.orm import Session
@@ -116,6 +116,8 @@ async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)):
         is_active=True,
     )
     db.add(user)
+    await db.flush()
+    await log_event(db, "user.register", actor_id=user.id, target_type="user", target_id=user.id, metadata={"email": body.email})
     await db.commit()
     await db.refresh(user)
     return RegisterResponse.model_validate(user)
@@ -138,12 +140,12 @@ async def login(
     refresh_raw = await _create_refresh_token(db, user.id)
     _set_refresh_cookie(response, refresh_raw)
 
-    # update last_login
     import sqlalchemy as sa
     await db.execute(
         sa.text("UPDATE users SET last_login = NOW() WHERE id = :id"),
         {"id": str(user.id)},
     )
+    await log_event(db, "user.login", actor_id=user.id, target_type="user", target_id=user.id, metadata={"email": user.email})
     await db.commit()
 
     return TokenResponse(access_token=access_token, user=UserOut.model_validate(user))
@@ -196,6 +198,7 @@ async def change_password(
         sa.text("UPDATE users SET password_hash = :hash WHERE id = :id"),
         {"hash": hash_password(body.new_password), "id": str(current_user.id)},
     )
+    await log_event(db, "user.password_change", actor_id=current_user.id, target_type="user", target_id=current_user.id)
     await db.commit()
     return {"message": "Password updated successfully"}
 
@@ -208,5 +211,7 @@ async def logout(
 ):
     if refresh_token:
         await _revoke_refresh_token(db, refresh_token)
+        await log_event(db, "user.logout")
+        await db.commit()
     response.delete_cookie("refresh_token", path="/api/v1/auth")
     return {"message": "Logged out"}

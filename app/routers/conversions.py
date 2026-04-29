@@ -26,6 +26,7 @@ from app.schemas.conversion import (
     SlideOut,
 )
 from app.services import claude, themes as theme_svc
+from app.services.audit import log_event
 
 router = APIRouter(prefix="/conversions", tags=["conversions"])
 
@@ -148,6 +149,8 @@ async def create_conversion(
                 "id": str(conv.id),
             },
         )
+        await log_event(db, "conversion.created", actor_id=current_user.id, target_type="conversion", target_id=conv.id,
+                        metadata={"filename": conv.original_filename, "slides": len(validated), "theme": body.theme})
         await db.flush()
 
     except Exception as exc:
@@ -155,6 +158,8 @@ async def create_conversion(
             sa.text("UPDATE conversions SET status='failed', error_message=:msg WHERE id=:id"),
             {"msg": str(exc)[:500], "id": str(conv.id)},
         )
+        await log_event(db, "conversion.failed", actor_id=current_user.id, target_type="conversion", target_id=conv.id,
+                        metadata={"filename": conv.original_filename, "error": str(exc)[:200]})
         await db.flush()
 
     return ConversionCreateResponse(
@@ -347,6 +352,8 @@ async def delete_conversion(
         sa.text("DELETE FROM conversions WHERE id = :id"),
         {"id": str(cid)},
     )
+    await log_event(db, "conversion.deleted", actor_id=current_user.id, target_type="conversion", target_id=cid,
+                    metadata={"filename": conv.original_filename})
 
 
 @router.get("/{conversion_id}/stream")
