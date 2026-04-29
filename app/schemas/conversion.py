@@ -21,7 +21,8 @@ VALID_AUDIENCES = {"c-suite", "technical", "general", "investors", "sales", "exe
 
 
 class ConversionCreate(BaseModel):
-    upload_id: uuid.UUID
+    upload_id: uuid.UUID | None = None
+    prompt_text: str | None = None
     theme: str = "clean_slate"
     style: str = "professional"
     audience_level: str = "general"
@@ -43,6 +44,21 @@ class ConversionCreate(BaseModel):
         if v > 50:
             raise ValueError("slide_count must not exceed 50")
         return v
+
+    @field_validator("prompt_text")
+    @classmethod
+    def validate_prompt_text(cls, v: str | None) -> str | None:
+        if v is not None:
+            v = v.strip()
+            if len(v) < 20:
+                raise ValueError("Prompt must be at least 20 characters")
+            if len(v) > 3000:
+                raise ValueError("Prompt must not exceed 3000 characters")
+        return v
+
+    def model_post_init(self, __context: object) -> None:
+        if not self.upload_id and not self.prompt_text:
+            raise ValueError("Either upload_id or prompt_text is required")
 
 
 class SlideOut(BaseModel):

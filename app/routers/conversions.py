@@ -53,65 +53,79 @@ async def create_conversion(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    # Verify upload exists and belongs to user
-    upload = await db.get(Upload, body.upload_id)
-    if not upload or upload.user_id != current_user.id:
-        raise HTTPException(status_code=404, detail={"code": "UPLOAD_NOT_FOUND", "message": "Upload not found"})
+    # ── Prompt-only mode (no file upload) ────────────────────────────────────
+    if body.prompt_text and not body.upload_id:
+        display_name = (body.prompt_text[:57] + "…") if len(body.prompt_text) > 57 else body.prompt_text
+        conv = Conversion(
+            id=uuid.uuid4(),
+            user_id=current_user.id,
+            upload_id=None,
+            original_filename=display_name,
+            status="pending",
+            style=body.style,
+            slide_count=body.slide_count,
+            theme=body.theme,
+            audience_level=body.audience_level,
+            speaker_notes=body.speaker_notes,
+        )
+        db.add(conv)
+        await db.flush()
+        doc_text = body.prompt_text
 
-    # Create conversion record
-    conv = Conversion(
-        id=uuid.uuid4(),
-        user_id=current_user.id,
-        upload_id=body.upload_id,
-        original_filename=upload.original_filename,
-        status="pending",
-        style=body.style,
-        slide_count=body.slide_count,
-        theme=body.theme,
-        audience_level=body.audience_level,
-        speaker_notes=body.speaker_notes,
-    )
-    db.add(conv)
-    await db.flush()
-
-    # Build document text for Claude
-    # If the upload was not parsed yet (confirm didn't parse), do it now from the raw file
-    if not upload.parsed_doc and not upload.parsed_preview:
-        from app.services.parser import parse_bytes
-        from app.services import gcs as _gcs
-        settings = get_settings()
-        try:
-            if _gcs.is_configured():
-                file_bytes = _gcs.download_bytes(settings.GCS_BUCKET, upload.gcs_key)
-            else:
-                file_path = _gcs.local_upload_path(str(upload.id))
-                file_bytes = file_path.read_bytes()
-            parsed = parse_bytes(file_bytes, upload.mime_type)
-            # Save parsed content back using ORM to avoid asyncpg ::jsonb cast issues
-            await db.execute(
-                sa.update(Upload).where(Upload.id == upload.id).values(
-                    parsed_doc=parsed.to_dict(),
-                    parsed_preview=parsed.preview(max_words=500),
-                )
-            )
-            upload.parsed_doc = parsed.to_dict()
-            upload.parsed_preview = parsed.preview(max_words=500)
-        except Exception as parse_err:
-            await db.rollback()
-            # Re-add conv and refresh upload so attributes aren't expired after rollback
-            db.add(conv)
-            await db.flush()
-            upload = await db.get(Upload, body.upload_id)
-
-    doc_text = ""
-    if upload and upload.parsed_doc:
-        from app.services.parser import ParsedDocument
-        doc = ParsedDocument.from_dict(upload.parsed_doc)
-        doc_text = doc.to_prompt_text()
-    elif upload and upload.parsed_preview:
-        doc_text = upload.parsed_preview
+    # ── File upload mode ──────────────────────────────────────────────────────
     else:
-        doc_text = f"Document: {upload.original_filename}\n\nPlease generate a {body.slide_count}-slide presentation."
+        upload = await db.get(Upload, body.upload_id)
+        if not upload or upload.user_id != current_user.id:
+            raise HTTPException(status_code=404, detail={"code": "UPLOAD_NOT_FOUND", "message": "Upload not found"})
+
+        conv = Conversion(
+            id=uuid.uuid4(),
+            user_id=current_user.id,
+            upload_id=body.upload_id,
+            original_filename=upload.original_filename,
+            status="pending",
+            style=body.style,
+            slide_count=body.slide_count,
+            theme=body.theme,
+            audience_level=body.audience_level,
+            speaker_notes=body.speaker_notes,
+        )
+        db.add(conv)
+        await db.flush()
+
+        if not upload.parsed_doc and not upload.parsed_preview:
+            from app.services.parser import parse_bytes
+            from app.services import gcs as _gcs
+            settings = get_settings()
+            try:
+                if _gcs.is_configured():
+                    file_bytes = _gcs.download_bytes(settings.GCS_BUCKET, upload.gcs_key)
+                else:
+                    file_path = _gcs.local_upload_path(str(upload.id))
+                    file_bytes = file_path.read_bytes()
+                parsed = parse_bytes(file_bytes, upload.mime_type)
+                await db.execute(
+                    sa.update(Upload).where(Upload.id == upload.id).values(
+                        parsed_doc=parsed.to_dict(),
+                        parsed_preview=parsed.preview(max_words=500),
+                    )
+                )
+                upload.parsed_doc = parsed.to_dict()
+                upload.parsed_preview = parsed.preview(max_words=500)
+            except Exception:
+                await db.rollback()
+                db.add(conv)
+                await db.flush()
+                upload = await db.get(Upload, body.upload_id)
+
+        if upload and upload.parsed_doc:
+            from app.services.parser import ParsedDocument
+            doc = ParsedDocument.from_dict(upload.parsed_doc)
+            doc_text = doc.to_prompt_text()
+        elif upload and upload.parsed_preview:
+            doc_text = upload.parsed_preview
+        else:
+            doc_text = f"Document: {upload.original_filename}\n\nPlease generate a {body.slide_count}-slide presentation."
 
     # Call Claude and save slides
     try:
