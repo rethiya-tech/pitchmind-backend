@@ -1,0 +1,33 @@
+version: "3.9"
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    restart: always
+    ports:
+      - "8000:8000"
+    volumes:
+      - ${GCS_CREDENTIALS_JSON}:/gcs-key.json:ro
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      JWT_SECRET: ${JWT_SECRET}
+      GCS_PROJECT_ID: ${GCS_PROJECT_ID}
+      GCS_BUCKET: ${GCS_BUCKET}
+      GCS_CREDENTIALS_JSON: /gcs-key.json
+      FRONTEND_URL: ${FRONTEND_URL}
+      ENVIRONMENT: production
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

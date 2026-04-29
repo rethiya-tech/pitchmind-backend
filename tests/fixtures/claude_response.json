@@ -1,0 +1,22 @@
+{
+  "slides": [
+    {
+      "layout": "hero",
+      "title": "Q3 Strategy Review",
+      "bullets": ["Market expansion", "Cost reduction", "Team growth"],
+      "speaker_notes": "Welcome to our Q3 strategy review. Today we will cover our key initiatives for market expansion, cost reduction programs, and team growth plans. These three pillars form the foundation of our Q3 objectives and will drive our performance through year end."
+    },
+    {
+      "layout": "bullets",
+      "title": "Agenda",
+      "bullets": ["Market expansion plans", "Cost initiatives", "Team updates", "Next steps"],
+      "speaker_notes": "Our agenda today covers four main areas. We will start with market expansion where we have exciting new opportunities. Then we will review our cost reduction initiatives which are tracking ahead of plan. Team updates will cover our recent hires and departures. Finally we will discuss clear next steps and accountability for each initiative."
+    },
+    {
+      "layout": "bullets",
+      "title": "Market Penetration Results",
+      "bullets": ["EMEA growth up 24 percent", "New distribution channels", "Partner revenue doubled"],
+      "speaker_notes": "Our market penetration results in Q3 have been exceptional. EMEA region showed 24 percent growth compared to Q2 driven by our new distribution strategy. We have opened three new distribution channels which are already producing revenue. Partner revenue has doubled year over year thanks to our revamped partner program launched in Q2."
+    }
+  ]
+}
