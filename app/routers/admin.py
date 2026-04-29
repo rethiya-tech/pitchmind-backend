@@ -9,6 +9,8 @@ from app.dependencies.db import get_db
 from app.models.audit_log import AuditLog
 from app.models.user import User
 from app.schemas.admin import (
+    AdminConversionListResponse,
+    AdminConversionOut,
     AdminMetrics,
     AdminUserListResponse,
     AdminUserOut,
@@ -198,6 +200,49 @@ async def patch_user(
         created_at=user.created_at,
         conversion_count=conv_count,
     )
+
+
+@router.get("/conversions", response_model=AdminConversionListResponse)
+async def list_all_conversions(
+    page: int = 1,
+    page_size: int = 20,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    offset = (page - 1) * page_size
+
+    total_result = await db.execute(sa.text("SELECT COUNT(*) FROM conversions"))
+    total = total_result.scalar() or 0
+
+    rows = await db.execute(
+        sa.text(
+            "SELECT c.id, c.user_id, c.original_filename, c.status, c.theme, "
+            "c.slide_count, c.tokens_used, c.created_at, "
+            "u.email AS user_email, u.name AS user_name "
+            "FROM conversions c "
+            "LEFT JOIN users u ON c.user_id = u.id "
+            "ORDER BY c.created_at DESC "
+            "LIMIT :limit OFFSET :offset"
+        ),
+        {"limit": page_size, "offset": offset},
+    )
+
+    items = []
+    for row in rows.mappings():
+        items.append(AdminConversionOut(
+            id=row["id"],
+            user_id=row["user_id"],
+            user_email=row.get("user_email"),
+            user_name=row.get("user_name"),
+            original_filename=row.get("original_filename"),
+            status=row["status"],
+            theme=row.get("theme"),
+            slide_count=row.get("slide_count"),
+            tokens_used=row.get("tokens_used"),
+            created_at=row["created_at"],
+        ))
+
+    return AdminConversionListResponse(items=items, total=total, page=page)
 
 
 @router.get("/audit-log", response_model=AuditLogListResponse)

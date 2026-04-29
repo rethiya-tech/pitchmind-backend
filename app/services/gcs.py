@@ -80,6 +80,11 @@ def blob_exists(bucket: str, key: str) -> bool:
     return client.bucket(bucket).blob(key).exists()
 
 
+def download_bytes(bucket: str, key: str) -> bytes:
+    client = _get_client()
+    return client.bucket(bucket).blob(key).download_as_bytes()
+
+
 # Local dev storage helpers — used when GCS is not configured
 
 LOCAL_UPLOAD_DIR = Path("local_uploads")
