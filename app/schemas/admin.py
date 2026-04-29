@@ -36,6 +36,27 @@ class AdminUserPatch(BaseModel):
     role: str | None = None
 
 
+class AdminConversionOut(BaseModel):
+    id: uuid.UUID
+    user_id: uuid.UUID | None
+    user_email: str | None
+    user_name: str | None
+    original_filename: str | None
+    status: str
+    theme: str | None
+    slide_count: int | None
+    tokens_used: int | None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class AdminConversionListResponse(BaseModel):
+    items: list[AdminConversionOut]
+    total: int
+    page: int
+
+
 class AuditLogEntry(BaseModel):
     id: uuid.UUID
     actor_email: str | None
