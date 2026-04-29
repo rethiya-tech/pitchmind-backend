@@ -225,8 +225,12 @@ def build_pptx(slides: list[Any], theme: Theme) -> bytes:
         sid = slide_idx * 20 + 10
         num_w = 457200  # 0.5 in — slide number chip width
 
-        # 1. Background
-        _set_background(sl, theme.bg)
+        # 1. Background — image if available, else solid color
+        bg_path = theme.bg_image_path()
+        if bg_path:
+            sl.shapes.add_picture(bg_path, Emu(0), Emu(0), Emu(SLIDE_W), Emu(SLIDE_H))
+        else:
+            _set_background(sl, theme.bg)
 
         # 2–5. All coloured rectangles (header, slide-number bg, divider, footer)
         _add_solid_rect(sl, 0, 0, SLIDE_W, HEADER_H, theme.accent, sid)
