@@ -5,8 +5,8 @@ from typing import Literal
 from pydantic import BaseModel, field_validator
 
 VALID_THEMES = {
-    "executive_modern", "corporate_zenith", "digital_frontier",
-    "nordic_flow", "midnight_insight", "executive_gold",
+    "clean_slate", "navy_gold", "dark_tech",
+    "charcoal_amber", "steel_blue", "forest_pro",
 }
 
 VALID_STYLES = {"executive", "technical", "narrative", "concise", "academic"}
@@ -15,7 +15,7 @@ VALID_AUDIENCES = {"c-suite", "technical", "general", "investors", "sales"}
 
 class ConversionCreate(BaseModel):
     upload_id: uuid.UUID
-    theme: str = "executive_gold"
+    theme: str = "clean_slate"
     style: str = "executive"
     audience_level: str = "general"
     slide_count: int = 10

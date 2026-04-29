@@ -12,23 +12,23 @@ class Theme:
 
 
 THEMES: dict[str, Theme] = {
-    "executive_modern": Theme(
-        "executive_modern", "Executive Modern", "#FFFFFF", "#1A1A1A", "#0F6E56"
+    "clean_slate": Theme(
+        "clean_slate", "Clean Slate", "#FFFFFF", "#111827", "#1E40AF"
     ),
-    "corporate_zenith": Theme(
-        "corporate_zenith", "Corporate Zenith", "#1A2A1A", "#FFFFFF", "#1D9E75"
+    "navy_gold": Theme(
+        "navy_gold", "Navy Gold", "#0F1F3D", "#FFFFFF", "#D4A017"
     ),
-    "digital_frontier": Theme(
-        "digital_frontier", "Digital Frontier", "#0A1628", "#FFFFFF", "#5DCAA5"
+    "dark_tech": Theme(
+        "dark_tech", "Dark Tech", "#111827", "#F9FAFB", "#06B6D4"
     ),
-    "nordic_flow": Theme(
-        "nordic_flow", "Nordic Flow", "#F5F4F0", "#1A1A1A", "#1D9E75"
+    "charcoal_amber": Theme(
+        "charcoal_amber", "Charcoal Amber", "#1F2937", "#F3F4F6", "#F59E0B"
     ),
-    "midnight_insight": Theme(
-        "midnight_insight", "Midnight Insight", "#1A1A1A", "#FFFFFF", "#C8850A"
+    "steel_blue": Theme(
+        "steel_blue", "Steel Blue", "#1E3A5F", "#FFFFFF", "#60A5FA"
     ),
-    "executive_gold": Theme(
-        "executive_gold", "Executive Gold", "#0D0D0D", "#FFFFFF", "#C8850A"
+    "forest_pro": Theme(
+        "forest_pro", "Forest Pro", "#064E3B", "#FFFFFF", "#34D399"
     ),
 }
 
