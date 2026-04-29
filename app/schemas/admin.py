@@ -7,10 +7,16 @@ from pydantic import BaseModel
 
 class AdminMetrics(BaseModel):
     total_users: int
+    active_users_today: int = 0
     total_conversions: int = 0
+    done_conversions: int = 0
     conversions_today: int
     failed_today: int
+    total_slides: int = 0
+    success_rate: float = 0.0
     ai_cost_today_usd: float
+    ai_cost_total_usd: float = 0.0
+    total_tokens: int = 0
 
 
 class AdminUserOut(BaseModel):
