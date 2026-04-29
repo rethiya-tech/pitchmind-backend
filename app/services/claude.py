@@ -14,7 +14,7 @@ JSON schema:
 {{
   "slides": [
     {{
-      "layout": "hero|bullets|two_column|data_table",
+      "layout": "hero|bullets|two_column|data_table|timeline|big_stat|process|quote",
       "title": "string — maximum 10 words",
       "bullets": ["string"],
       "speaker_notes": "string — 50 to 150 words"
@@ -24,21 +24,35 @@ JSON schema:
 
 LAYOUT SELECTION — choose based on slide content:
 - hero: ONLY the first slide. Large title + subtitle. bullets[0] = subtitle/tagline.
-- data_table: when content has metrics, statistics, specifications, key-value data, feature lists with values, or any structured label-value information. Format EVERY bullet as "Label: Value" (e.g. "Total Users: 1,200", "Revenue: $5.2M", "Status: Completed"). Minimum 4 rows.
-- two_column: when comparing two things side-by-side — pros vs cons, before vs after, features vs benefits, two phases, two teams, two options. First half of bullets = left column, second half = right column. Use equal numbers of bullets on each side.
-- bullets: all other content — processes, steps, explanations, descriptions, narrative content.
+- data_table: detailed metrics tables with 4+ rows. Format EVERY bullet as "Label: Value" (e.g. "Revenue: $5.2M", "Status: Completed").
+- two_column: comparing two things — pros vs cons, before vs after, two options. Equal bullets per side.
+- timeline: phases, stages, milestones, or sequences. Format EVERY bullet as "Phase: Description" (e.g. "Q1: Market research completed"). Min 3, max 6 items.
+- big_stat: 2–3 key metrics worth highlighting with large numbers. Format EVERY bullet as "Label: Value" (e.g. "Revenue Growth: +47%"). Use EXACTLY 2 or 3 bullets.
+- process: workflows, procedures, numbered steps. Each bullet = one step. Min 3, max 5 steps.
+- quote: notable quote, testimonial, or key statement. bullets[0] = quote text, bullets[1] = attribution/source. Max 2 bullets.
+- bullets: all other content — explanations, descriptions, narrative points.
 
 RULES:
 1. First slide MUST be hero layout
-2. Use data_table for at least 1-2 slides if document has any metrics or structured data
-3. Use two_column for at least 1 slide if document has comparisons or two-sided content
-4. Title: strictly maximum 10 words
-5. Bullets: minimum 3, maximum 6 per slide (for data_table: minimum 4, maximum 7)
-6. Each bullet: maximum 15 words
-7. Speaker notes: 50-150 words
-8. Style: {STYLE}
-9. Audience: {AUDIENCE_LEVEL}
-10. Total slides: approximately {SLIDE_COUNT}\
+2. Use timeline for any sequence/phases content when present
+3. Use big_stat to spotlight 2–3 key metrics (striking visual impact)
+4. Use process for any workflow or step-by-step content
+5. Use data_table for detailed metric tables (4+ rows)
+6. Use two_column for comparisons and two-sided content
+7. Title: strictly maximum 10 words
+8. Per-layout bullet counts:
+   - hero: 1–2 bullets (subtitle/tagline)
+   - bullets, two_column: min 3, max 6
+   - data_table: min 4, max 7
+   - timeline: min 3, max 6 (format: "Phase: Description")
+   - big_stat: exactly 2 or 3 (format: "Label: Value")
+   - process: min 3, max 5
+   - quote: 1–2 bullets (quote then optional attribution)
+9. Each bullet: maximum 15 words
+10. Speaker notes: 50-150 words
+11. Style: {STYLE}
+12. Audience: {AUDIENCE_LEVEL}
+13. Total slides: approximately {SLIDE_COUNT}\
 """
 
 
@@ -66,16 +80,55 @@ def validate_slides(raw: dict) -> list[dict]:
     out = []
     for s in slides:
         title = " ".join(s.get("title", "").split()[:10])
-        bullets = [" ".join(b.split()[:15]) for b in s.get("bullets", [])][:6]
-        while len(bullets) < 3:
-            bullets.append("Key point")
+        layout = s.get("layout", "bullets")
+        bullets_raw = [" ".join(b.split()[:15]) for b in s.get("bullets", [])]
+
+        if layout == "data_table":
+            bullets = bullets_raw[:7]
+            while len(bullets) < 4:
+                bullets.append(f"Key metric {len(bullets) + 1}: Value")
+        elif layout == "big_stat":
+            bullets = bullets_raw[:3]
+            while len(bullets) < 2:
+                bullets.append(f"Metric {len(bullets) + 1}: Value")
+        elif layout == "process":
+            bullets = bullets_raw[:5]
+            while len(bullets) < 3:
+                bullets.append(f"Step {len(bullets) + 1}")
+        elif layout == "timeline":
+            bullets = bullets_raw[:6]
+            while len(bullets) < 3:
+                bullets.append(f"Phase {len(bullets) + 1}: Description")
+        elif layout == "quote":
+            bullets = bullets_raw[:2]
+            while len(bullets) < 1:
+                bullets.append("Insert quote here")
+        else:  # hero, bullets, two_column
+            bullets = bullets_raw[:6]
+            while len(bullets) < 3:
+                bullets.append("Key point")
+
         out.append({
-            "layout": s.get("layout", "bullets"),
+            "layout": layout,
             "title": title,
             "bullets": bullets,
             "speaker_notes": (s.get("speaker_notes", "") or "")[:800],
         })
     return out
+
+
+def friendly_error(exc: Exception) -> str:
+    msg = str(exc)
+    low = msg.lower()
+    if "429" in msg or "resource_exhausted" in low or "quota" in low or "rate_limit" in low:
+        return "AI quota exceeded — please wait a few minutes and try again."
+    if "401" in msg or "api_key" in low or "invalid key" in low or "unauthenticated" in low:
+        return "AI API key is invalid or missing. Please check your configuration."
+    if "timeout" in low or "timed out" in low or "deadline" in low:
+        return "AI service timed out — please try again."
+    if "json" in low or "unterminated" in low or "parse" in low:
+        return "AI returned an unexpected response. Please try again with fewer slides."
+    return "AI generation failed — please try again."
 
 
 def _is_placeholder_anthropic_key(key: str) -> bool:

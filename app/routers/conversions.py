@@ -168,9 +168,11 @@ async def create_conversion(
         await db.flush()
 
     except Exception as exc:
+        from app.services.claude import friendly_error
+        user_msg = friendly_error(exc)
         await db.execute(
             sa.text("UPDATE conversions SET status='failed', error_message=:msg WHERE id=:id"),
-            {"msg": str(exc)[:500], "id": str(conv.id)},
+            {"msg": user_msg, "id": str(conv.id)},
         )
         await log_event(db, "conversion.failed", actor_id=current_user.id, target_type="conversion", target_id=conv.id,
                         metadata={"filename": conv.original_filename, "error": str(exc)[:200]})
