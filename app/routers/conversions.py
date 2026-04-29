@@ -96,18 +96,18 @@ async def create_conversion(
             upload.parsed_doc = parsed.to_dict()
             upload.parsed_preview = parsed.preview(max_words=500)
         except Exception as parse_err:
-            # Roll back only the parsing update so the rest of the transaction continues
             await db.rollback()
-            # Re-add the conversion that was flushed before the rollback
+            # Re-add conv and refresh upload so attributes aren't expired after rollback
             db.add(conv)
             await db.flush()
+            upload = await db.get(Upload, body.upload_id)
 
     doc_text = ""
-    if upload.parsed_doc:
+    if upload and upload.parsed_doc:
         from app.services.parser import ParsedDocument
         doc = ParsedDocument.from_dict(upload.parsed_doc)
         doc_text = doc.to_prompt_text()
-    elif upload.parsed_preview:
+    elif upload and upload.parsed_preview:
         doc_text = upload.parsed_preview
     else:
         doc_text = f"Document: {upload.original_filename}\n\nPlease generate a {body.slide_count}-slide presentation."
@@ -372,6 +372,13 @@ async def stream_conversion(
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Conversion not found"})
 
     async def event_generator():
+        # Check if conversion failed — surface the error immediately
+        fresh_conv = await db.get(Conversion, conv.id)
+        if fresh_conv and fresh_conv.status == "failed":
+            msg = fresh_conv.error_message or "Generation failed"
+            yield f"event: error\ndata: {json.dumps({'message': msg})}\n\n"
+            return
+
         result = await db.execute(
             sa.select(Slide)
             .where(Slide.conversion_id == conversion_id, Slide.is_deleted == False)
@@ -379,6 +386,11 @@ async def stream_conversion(
         )
         slides = result.scalars().all()
         total = len(slides)
+
+        if total == 0:
+            err_msg = (fresh_conv.error_message if fresh_conv else None) or "No slides were generated"
+            yield f"event: error\ndata: {json.dumps({'message': err_msg})}\n\n"
+            return
 
         for i, slide in enumerate(slides):
             yield f"event: slide_start\ndata: {json.dumps({'index': i, 'total': total})}\n\n"
@@ -394,9 +406,8 @@ async def stream_conversion(
             yield f"event: progress\ndata: {json.dumps({'completed': i + 1, 'total': total})}\n\n"
             await asyncio.sleep(0)
 
-        # Mark as done
         await db.execute(
-            sa.text("UPDATE conversions SET status='done', completed_at=NOW() WHERE id=:id AND status != 'done'"),
+            sa.text("UPDATE conversions SET status='done', completed_at=NOW() WHERE id=:id AND status = 'pending'"),
             {"id": str(conversion_id)},
         )
         yield f"event: done\ndata: {json.dumps({'conversion_id': str(conversion_id), 'total_slides': total})}\n\n"

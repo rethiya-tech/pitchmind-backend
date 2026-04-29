@@ -120,7 +120,7 @@ async def _call_gemini(system: str, user_message: str) -> tuple[dict, int]:
         contents=user_message,
         config=types.GenerateContentConfig(
             system_instruction=system,
-            max_output_tokens=4096,
+            max_output_tokens=_tokens_for_slides(system),
         ),
     )
     text = strip_fences(response.text.strip())
@@ -129,13 +129,20 @@ async def _call_gemini(system: str, user_message: str) -> tuple[dict, int]:
     return result, tokens
 
 
+def _tokens_for_slides(system: str) -> int:
+    m = re.search(r"approximately (\d+)", system)
+    n = int(m.group(1)) if m else 10
+    # ~400 tokens per slide (title + bullets + speaker_notes + JSON overhead)
+    return min(8192, max(4096, n * 400))
+
+
 async def _call_anthropic(system: str, user_message: str) -> tuple[dict, int]:
     from anthropic import AsyncAnthropic
     settings = get_settings()
     client = AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
     response = await client.messages.create(
         model="claude-sonnet-4-5",
-        max_tokens=4096,
+        max_tokens=_tokens_for_slides(system),
         system=system,
         messages=[{"role": "user", "content": user_message}],
     )

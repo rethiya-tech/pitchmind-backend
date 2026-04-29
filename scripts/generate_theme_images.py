@@ -1,5 +1,5 @@
 """
-Generate professional background images for all 6 themes.
+Generate professional background images for all 18 themes.
 Run from repo root: python scripts/generate_theme_images.py
 Outputs:
   app/assets/themes/{id}_bg.png   — embedded in PPTX (960x540)
@@ -45,7 +45,7 @@ def diagonal_gradient(w, h, c1, c2):
     return img
 
 
-# ── Theme generators ──────────────────────────────────────────────────────────
+# ── Professional theme generators ─────────────────────────────────────────────
 
 def make_clean_slate():
     """Dark slate — subtle diagonal grid lines, minimal dots."""
@@ -266,16 +266,343 @@ def make_forest_pro():
     return img
 
 
+# ── Creative theme generators ──────────────────────────────────────────────────
+# Visual language: bold diagonal bands, large overlapping abstract shapes,
+# high-contrast color clashes, energetic — clearly distinct from Professional.
+
+def make_vivid_purple():
+    """Purple-to-magenta bold diagonal split with large overlapping rings."""
+    img = Image.new("RGB", (W, H))
+    px = img.load()
+    # Dramatic diagonal gradient: deep purple → vivid magenta
+    for y in range(H):
+        for x in range(W):
+            t = (x / W * 0.55 + y / H * 0.45)
+            r = _lerp(21, 160, t)
+            g = _lerp(2, 0, t)
+            b = _lerp(40, 200, t)
+            px[x, y] = (r, g, b)
+
+    draw = ImageDraw.Draw(img)
+
+    # Large bold overlapping circles (outlines only — abstract art feel)
+    circles = [
+        (W * 0.75, H * 0.25, 220, (200, 40, 255, 60)),
+        (W * 0.55, H * 0.65, 180, (160, 0, 220, 50)),
+        (W * 0.85, H * 0.7, 140, (220, 80, 255, 45)),
+        (W * 0.15, H * 0.3, 160, (120, 0, 180, 40)),
+    ]
+    for cx, cy, r, color in circles:
+        for dr in range(0, 18, 3):
+            draw.ellipse([cx-r+dr, cy-r+dr, cx+r-dr, cy+r-dr],
+                         outline=(color[0], color[1], color[2]), width=2)
+
+    # Bold diagonal accent band
+    band_pts = [(0, H*0.6), (W*0.4, 0), (W*0.4+60, 0), (60, H*0.6)]
+    draw.polygon(band_pts, fill=(168, 85, 247, 30))
+
+    return img
+
+
+def make_sunset_orange():
+    """Warm sunset: bold horizontal gradient bands from deep crimson to amber."""
+    img = Image.new("RGB", (W, H))
+    px = img.load()
+    # Top = near-black, bottom-center = vivid amber/orange
+    for y in range(H):
+        for x in range(W):
+            # Horizontal + vertical mix for warmth in center-bottom
+            dist_center = abs(x / W - 0.5)
+            warm = max(0.0, 1.0 - dist_center * 1.4) * (y / H)
+            r = _lerp(20, 240, warm)
+            g = _lerp(3, 100, warm * 0.7)
+            b = _lerp(5, 10, warm * 0.3)
+            px[x, y] = (min(255, r), min(255, g), min(255, b))
+
+    draw = ImageDraw.Draw(img)
+
+    # Horizontal horizon glow band
+    for thickness, alpha_frac in [(60, 0.6), (120, 0.35), (200, 0.15)]:
+        y0 = int(H * 0.62) - thickness // 2
+        for dy in range(thickness):
+            t = 1.0 - abs(dy - thickness / 2) / (thickness / 2)
+            r = int(255 * t * alpha_frac)
+            g = int(120 * t * alpha_frac)
+            b = 0
+            cur_row = y0 + dy
+            if 0 <= cur_row < H:
+                row_img = Image.new("RGB", (W, 1), (r, g, b))
+                img.paste(Image.blend(img.crop((0, cur_row, W, cur_row+1)), row_img, 0.4),
+                          (0, cur_row))
+
+    draw = ImageDraw.Draw(img)
+    # Starburst lines from horizon center
+    cx, cy = W // 2, int(H * 0.62)
+    for angle_deg in range(0, 360, 20):
+        angle = math.radians(angle_deg)
+        ex = int(cx + math.cos(angle) * 600)
+        ey = int(cy + math.sin(angle) * 400)
+        draw.line([(cx, cy), (ex, ey)], fill=(200, 80, 0), width=1)
+
+    return img
+
+
+def make_ocean_teal():
+    """Deep ocean: bold curved wave bands, layered from dark to bright teal."""
+    img = Image.new("RGB", (W, H), _hex("#001818"))
+    draw = ImageDraw.Draw(img)
+
+    # Bold layered wave bands — thicker and higher contrast than professional
+    for i in range(14):
+        y_center = int(H * (0.1 + i * 0.08))
+        amplitude = 35 + i * 4
+        freq = 0.012 - i * 0.0003
+        green = 40 + i * 14
+        blue = 50 + i * 12
+        thickness = 2 + (i % 3)
+        pts = []
+        for x in range(0, W + 1, 4):
+            y = y_center + int(amplitude * math.sin(x * freq + i * 1.1))
+            pts.append((x, y))
+        for j in range(len(pts) - 1):
+            draw.line([pts[j], pts[j+1]], fill=(0, min(255, green), min(255, blue)), width=thickness)
+
+    # Large bold circle outline — "portal" shape, top-right
+    draw.ellipse([W*2//3, -60, W+120, H//2+60], outline=(20, 200, 180), width=4)
+    draw.ellipse([W*2//3+30, -30, W+90, H//2+30], outline=(10, 160, 150), width=2)
+
+    return img
+
+
+def make_neon_blue():
+    """Cyberpunk grid: bright neon grid lines on near-black with scanline glow."""
+    img = Image.new("RGB", (W, H), _hex("#000A16"))
+    draw = ImageDraw.Draw(img)
+
+    # Perspective grid — vanishing point at center
+    cx, cy = W // 2, H // 2
+
+    # Horizontal grid lines (converging slightly)
+    for i, y in enumerate(range(0, H + 1, 30)):
+        t = abs(y - cy) / (H / 2)
+        brightness = max(20, int(90 * (1 - t * 0.7)))
+        draw.line([(0, y), (W, y)], fill=(0, brightness // 2, brightness), width=1)
+
+    # Vertical grid lines
+    for x in range(0, W + 1, 40):
+        t = abs(x - cx) / (W / 2)
+        brightness = max(20, int(80 * (1 - t * 0.5)))
+        draw.line([(x, 0), (x, H)], fill=(0, brightness // 3, brightness), width=1)
+
+    # Bright neon horizontal accent lines (scanlines)
+    for y_accent in [H // 3, H // 2, H * 2 // 3]:
+        draw.line([(0, y_accent), (W, y_accent)], fill=(0, 180, 255), width=2)
+        draw.line([(0, y_accent - 1), (W, y_accent - 1)], fill=(0, 80, 120), width=1)
+        draw.line([(0, y_accent + 1), (W, y_accent + 1)], fill=(0, 80, 120), width=1)
+
+    # Neon corner bracket — top-left
+    bracket_size = 80
+    draw.line([(20, 20), (20 + bracket_size, 20)], fill=(56, 189, 248), width=3)
+    draw.line([(20, 20), (20, 20 + bracket_size)], fill=(56, 189, 248), width=3)
+    # bottom-right
+    draw.line([(W-20-bracket_size, H-20), (W-20, H-20)], fill=(56, 189, 248), width=3)
+    draw.line([(W-20, H-20-bracket_size), (W-20, H-20)], fill=(56, 189, 248), width=3)
+
+    return img
+
+
+def make_ruby_red():
+    """Bold red: large diamond & triangle shapes, strong diagonal energy."""
+    img = Image.new("RGB", (W, H))
+    px = img.load()
+    # Left-to-right diagonal: deep maroon → vivid crimson
+    for y in range(H):
+        for x in range(W):
+            t = x / W * 0.7 + y / H * 0.3
+            r = _lerp(22, 200, t)
+            g = _lerp(0, 10, t)
+            b = _lerp(0, 25, t)
+            px[x, y] = (min(255, r), g, b)
+
+    draw = ImageDraw.Draw(img)
+
+    # Large diamond shapes (filled, semi-transparent — simulate with repeated draw)
+    diamonds = [
+        (W * 0.72, H * 0.35, 200),   # large right
+        (W * 0.85, H * 0.72, 120),   # medium bottom-right
+        (W * 0.52, H * 0.15, 90),    # small top-center
+    ]
+    for cx, cy, size in diamonds:
+        pts = [(cx, cy - size), (cx + size * 0.6, cy),
+               (cx, cy + size), (cx - size * 0.6, cy)]
+        # Outline only — bold and layered
+        draw.polygon(pts, outline=(244, 63, 94), fill=None)
+        inner = [(cx, cy - size * 0.7), (cx + size * 0.42, cy),
+                 (cx, cy + size * 0.7), (cx - size * 0.42, cy)]
+        draw.polygon(inner, outline=(200, 30, 60), fill=None)
+
+    # Bold diagonal cut line
+    draw.line([(0, H * 0.4), (W * 0.6, 0)], fill=(180, 30, 50), width=3)
+    draw.line([(0, H * 0.4 + 6), (W * 0.6 + 6, 0)], fill=(100, 15, 25), width=1)
+
+    return img
+
+
+def make_cosmic_indigo():
+    """Nebula: bold multi-color cloud washes, dramatic deep space feel."""
+    img = Image.new("RGB", (W, H), _hex("#000818"))
+    draw = ImageDraw.Draw(img)
+
+    # Layered nebula clouds — multiple large blurred ellipses of different colors
+    clouds = [
+        # (cx, cy, rx, ry, color, passes)
+        (int(W * 0.3), int(H * 0.4), 320, 240, (80, 0, 180), 40),    # purple left
+        (int(W * 0.7), int(H * 0.55), 280, 200, (30, 0, 130), 35),   # deep blue right
+        (int(W * 0.5), int(H * 0.2), 200, 150, (120, 40, 200), 30),  # violet top-center
+        (int(W * 0.15), int(H * 0.75), 180, 140, (60, 20, 160), 25), # dark indigo bottom-left
+    ]
+    for cx, cy, rx, ry, color, passes in clouds:
+        for i in range(passes, 0, -1):
+            t = i / passes
+            scale = t
+            r_val = min(255, int(color[0] * (1 - t * 0.8)))
+            g_val = min(255, int(color[1] * (1 - t * 0.5)))
+            b_val = min(255, int(color[2] * (1 - t * 0.4)))
+            ex0 = int(cx - rx * scale)
+            ey0 = int(cy - ry * scale)
+            ex1 = int(cx + rx * scale)
+            ey1 = int(cy + ry * scale)
+            draw.ellipse([ex0, ey0, ex1, ey1], fill=(r_val, g_val, b_val))
+
+    # Star field on top
+    import random; random.seed(99)
+    for _ in range(250):
+        x = random.randint(0, W); y = random.randint(0, H)
+        b_val = random.randint(120, 255)
+        purple_tint = random.randint(0, 80)
+        size = random.choice([1, 1, 1, 2])
+        draw.ellipse([x-size, y-size, x+size, y+size], fill=(b_val, purple_tint, b_val))
+
+    # Blur the whole thing for a painterly nebula effect
+    img = img.filter(ImageFilter.GaussianBlur(radius=3))
+
+    # Re-draw sharp stars on top after blur
+    draw = ImageDraw.Draw(img)
+    random.seed(77)
+    for _ in range(80):
+        x = random.randint(0, W); y = random.randint(0, H)
+        draw.ellipse([x, y, x+1, y+1], fill=(255, 200, 255))
+
+    return img
+
+
+# ── Minimal theme generators ───────────────────────────────────────────────────
+
+def make_pure_white():
+    img = vertical_gradient(W, H, _hex("#FFFFFF"), _hex("#F5F6F8"))
+    draw = ImageDraw.Draw(img)
+    for i in range(-H, W+H, 50):
+        draw.line([(i, 0), (i+H, H)], fill=(220, 222, 226), width=1)
+    import random; random.seed(5)
+    for _ in range(40):
+        x = random.randint(W*2//3, W); y = random.randint(0, H//3)
+        r = random.choice([2, 3])
+        draw.ellipse([x-r, y-r, x+r, y+r], fill=(180, 195, 230))
+    return img
+
+
+def make_warm_ivory():
+    img = vertical_gradient(W, H, _hex("#FFFDF5"), _hex("#FFF5E0"))
+    draw = ImageDraw.Draw(img)
+    for cx, cy, r in [(int(W*0.8), int(H*0.2), 180), (int(W*0.1), int(H*0.8), 120), (int(W*0.9), int(H*0.7), 80)]:
+        for dr in range(r, 0, -10):
+            t = 1 - dr/r
+            color = (_lerp(255, 240, t*0.3), _lerp(245, 210, t*0.3), _lerp(220, 160, t*0.3))
+            draw.ellipse([cx-dr, cy-dr, cx+dr, cy+dr], outline=color)
+    return img
+
+
+def make_soft_grey():
+    img = vertical_gradient(W, H, _hex("#F8F9FA"), _hex("#EDEFF2"))
+    draw = ImageDraw.Draw(img)
+    for y in range(60, H, 60):
+        draw.line([(0, y), (W, y)], fill=(210, 214, 220), width=1)
+    draw.rectangle([W - 8, 0, W, H], fill=(190, 200, 215))
+    import random; random.seed(3)
+    for _ in range(30):
+        x = random.randint(0, W); y = random.randint(0, H//4)
+        draw.ellipse([x-2, y-2, x+2, y+2], fill=(185, 195, 210))
+    return img
+
+
+def make_light_pearl():
+    img = vertical_gradient(W, H, _hex("#EEF2FF"), _hex("#E8EDFF"))
+    draw = ImageDraw.Draw(img)
+    for cx, cy, r, color in [
+        (int(W*0.85), int(H*0.15), 200, (200, 210, 240)),
+        (int(W*0.1), int(H*0.85), 160, (195, 208, 238)),
+        (int(W*0.5), int(H*0.5), 120, (205, 215, 242)),
+    ]:
+        for dr in range(r, max(0, r-40), -5):
+            draw.ellipse([cx-dr, cy-dr, cx+dr, cy+dr], outline=color)
+    return img
+
+
+def make_sage_mist():
+    img = vertical_gradient(W, H, _hex("#F2F7F2"), _hex("#E8F2E8"))
+    draw = ImageDraw.Draw(img)
+    for i in range(6):
+        y_base = 80 + i * 70
+        pts = [(x, y_base + int(25 * math.sin(x / 130 + i * 0.8))) for x in range(0, W+1, 10)]
+        for j in range(len(pts)-1):
+            draw.line([pts[j], pts[j+1]], fill=(180, 210, 180), width=1)
+    import random; random.seed(17)
+    for _ in range(50):
+        x = random.randint(0, W); y = random.randint(0, H)
+        draw.ellipse([x-2, y-2, x+2, y+2], fill=(160, 200, 160))
+    return img
+
+
+def make_warm_slate():
+    img = vertical_gradient(W, H, _hex("#F4F6F8"), _hex("#E8ECF1"))
+    draw = ImageDraw.Draw(img)
+    for x in range(0, W, 80):
+        draw.line([(x, 0), (x, H)], fill=(210, 216, 225), width=1)
+    for y in range(0, H, 80):
+        draw.line([(0, y), (W, y)], fill=(210, 216, 225), width=1)
+    draw.line([(0, H), (W*2//3, 0)], fill=(190, 200, 215), width=2)
+    for cx, cy in [(0, 0), (W, 0), (0, H), (W, H)]:
+        for r in range(60, 20, -15):
+            draw.ellipse([cx-r, cy-r, cx+r, cy+r], outline=(195, 205, 218))
+    return img
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 THEMES = [
+    # Professional
     ("clean_slate",    make_clean_slate),
     ("navy_gold",      make_navy_gold),
     ("dark_tech",      make_dark_tech),
     ("charcoal_amber", make_charcoal_amber),
     ("steel_blue",     make_steel_blue),
     ("forest_pro",     make_forest_pro),
+    # Creative
+    ("vivid_purple",   make_vivid_purple),
+    ("sunset_orange",  make_sunset_orange),
+    ("ocean_teal",     make_ocean_teal),
+    ("neon_blue",      make_neon_blue),
+    ("ruby_red",       make_ruby_red),
+    ("cosmic_indigo",  make_cosmic_indigo),
+    # Minimal
+    ("pure_white",     make_pure_white),
+    ("warm_ivory",     make_warm_ivory),
+    ("soft_grey",      make_soft_grey),
+    ("light_pearl",    make_light_pearl),
+    ("sage_mist",      make_sage_mist),
+    ("warm_slate",     make_warm_slate),
 ]
+
 
 def main():
     script_dir = os.path.dirname(os.path.abspath(__file__))

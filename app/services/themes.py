@@ -46,6 +46,56 @@ THEMES: dict[str, Theme] = {
         "forest_pro", "Forest Pro", "#04321E", "#FFFFFF", "#34D399",
         bg_image="forest_pro_bg.png",
     ),
+    # ── Creative ──────────────────────────────────────────────────────────────
+    "vivid_purple": Theme(
+        "vivid_purple", "Vivid Purple", "#150228", "#FFFFFF", "#A855F7",
+        bg_image="vivid_purple_bg.png",
+    ),
+    "sunset_orange": Theme(
+        "sunset_orange", "Sunset Orange", "#170500", "#FFFFFF", "#F97316",
+        bg_image="sunset_orange_bg.png",
+    ),
+    "ocean_teal": Theme(
+        "ocean_teal", "Ocean Teal", "#001818", "#FFFFFF", "#14B8A6",
+        bg_image="ocean_teal_bg.png",
+    ),
+    "neon_blue": Theme(
+        "neon_blue", "Neon Blue", "#000A16", "#F0F9FF", "#38BDF8",
+        bg_image="neon_blue_bg.png",
+    ),
+    "ruby_red": Theme(
+        "ruby_red", "Ruby Red", "#160000", "#FFFFFF", "#F43F5E",
+        bg_image="ruby_red_bg.png",
+    ),
+    "cosmic_indigo": Theme(
+        "cosmic_indigo", "Cosmic Indigo", "#000818", "#FFFFFF", "#818CF8",
+        bg_image="cosmic_indigo_bg.png",
+    ),
+    # ── Minimal ───────────────────────────────────────────────────────────────
+    "pure_white": Theme(
+        "pure_white", "Pure White", "#FFFFFF", "#1F2937", "#3B82F6",
+        bg_image="pure_white_bg.png",
+    ),
+    "warm_ivory": Theme(
+        "warm_ivory", "Warm Ivory", "#FFFDF5", "#292524", "#D97706",
+        bg_image="warm_ivory_bg.png",
+    ),
+    "soft_grey": Theme(
+        "soft_grey", "Soft Grey", "#F8F9FA", "#1F2937", "#475569",
+        bg_image="soft_grey_bg.png",
+    ),
+    "light_pearl": Theme(
+        "light_pearl", "Light Pearl", "#EEF2FF", "#1E3A5F", "#4F46E5",
+        bg_image="light_pearl_bg.png",
+    ),
+    "sage_mist": Theme(
+        "sage_mist", "Sage Mist", "#F2F7F2", "#14532D", "#16A34A",
+        bg_image="sage_mist_bg.png",
+    ),
+    "warm_slate": Theme(
+        "warm_slate", "Warm Slate", "#F4F6F8", "#334155", "#64748B",
+        bg_image="warm_slate_bg.png",
+    ),
 }
 
 
