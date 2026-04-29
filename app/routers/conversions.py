@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.core.security import decode_access_token
 from app.dependencies.auth import get_current_user
 from app.dependencies.db import get_db
@@ -73,6 +74,34 @@ async def create_conversion(
     await db.flush()
 
     # Build document text for Claude
+    # If the upload was not parsed yet (confirm didn't parse), do it now from the raw file
+    if not upload.parsed_doc and not upload.parsed_preview:
+        from app.services.parser import parse_bytes
+        from app.services import gcs as _gcs
+        settings = get_settings()
+        try:
+            if _gcs.is_configured():
+                file_bytes = _gcs.download_bytes(settings.GCS_BUCKET, upload.gcs_key)
+            else:
+                file_path = _gcs.local_upload_path(str(upload.id))
+                file_bytes = file_path.read_bytes()
+            parsed = parse_bytes(file_bytes, upload.mime_type)
+            # Save parsed content back using ORM to avoid asyncpg ::jsonb cast issues
+            await db.execute(
+                sa.update(Upload).where(Upload.id == upload.id).values(
+                    parsed_doc=parsed.to_dict(),
+                    parsed_preview=parsed.preview(max_words=500),
+                )
+            )
+            upload.parsed_doc = parsed.to_dict()
+            upload.parsed_preview = parsed.preview(max_words=500)
+        except Exception as parse_err:
+            # Roll back only the parsing update so the rest of the transaction continues
+            await db.rollback()
+            # Re-add the conversion that was flushed before the rollback
+            db.add(conv)
+            await db.flush()
+
     doc_text = ""
     if upload.parsed_doc:
         from app.services.parser import ParsedDocument
@@ -144,19 +173,31 @@ async def list_conversions(
     current_user: User = Depends(get_current_user),
 ):
     offset = (page - 1) * page_size
-    total_result = await db.execute(
-        sa.text("SELECT COUNT(*) FROM conversions WHERE user_id = :uid"),
-        {"uid": str(current_user.id)},
-    )
-    total = total_result.scalar() or 0
+    is_admin = current_user.role == "admin"
 
-    result = await db.execute(
-        sa.select(Conversion)
-        .where(Conversion.user_id == current_user.id)
-        .order_by(Conversion.created_at.desc())
-        .offset(offset)
-        .limit(page_size)
-    )
+    if is_admin:
+        total_result = await db.execute(sa.text("SELECT COUNT(*) FROM conversions"))
+        total = total_result.scalar() or 0
+        result = await db.execute(
+            sa.select(Conversion)
+            .order_by(Conversion.created_at.desc())
+            .offset(offset)
+            .limit(page_size)
+        )
+    else:
+        total_result = await db.execute(
+            sa.text("SELECT COUNT(*) FROM conversions WHERE user_id = :uid"),
+            {"uid": str(current_user.id)},
+        )
+        total = total_result.scalar() or 0
+        result = await db.execute(
+            sa.select(Conversion)
+            .where(Conversion.user_id == current_user.id)
+            .order_by(Conversion.created_at.desc())
+            .offset(offset)
+            .limit(page_size)
+        )
+
     convs = result.scalars().all()
     return ConversionListResponse(
         items=[ConversionOut.model_validate(c) for c in convs],
@@ -281,6 +322,31 @@ async def cancel_conversion(
         {"id": str(cid)},
     )
     return CancelResponse(message="Cancelled", slides_completed=slides_completed)
+
+
+@router.delete("/{conversion_id}", status_code=204)
+async def delete_conversion(
+    conversion_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    cid = _parse_uuid(conversion_id)
+    # Admins can delete any conversion; regular users only their own
+    if current_user.role == "admin":
+        conv = await db.get(Conversion, cid)
+        if not conv:
+            raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Conversion not found"})
+    else:
+        conv = await _get_conversion_for_user(cid, current_user, db)
+
+    await db.execute(
+        sa.text("DELETE FROM slides WHERE conversion_id = :cid"),
+        {"cid": str(cid)},
+    )
+    await db.execute(
+        sa.text("DELETE FROM conversions WHERE id = :id"),
+        {"id": str(cid)},
+    )
 
 
 @router.get("/{conversion_id}/stream")
