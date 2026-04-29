@@ -55,15 +55,42 @@ async def get_metrics(
             "WHERE created_at >= NOW() - INTERVAL '1 day'"
         )
     )
-    tokens = cost_result.scalar() or 0
-    ai_cost = float(tokens) * 0.000003
+    tokens_today = cost_result.scalar() or 0
+
+    total_tokens_result = await db.execute(
+        sa.text("SELECT COALESCE(SUM(tokens_used), 0) FROM conversions")
+    )
+    total_tokens = total_tokens_result.scalar() or 0
+
+    done_result = await db.execute(
+        sa.text("SELECT COUNT(*) FROM conversions WHERE status = 'done'")
+    )
+    done_conversions = done_result.scalar() or 0
+
+    slides_result = await db.execute(
+        sa.text("SELECT COALESCE(SUM(slide_count), 0) FROM conversions WHERE status = 'done'")
+    )
+    total_slides = slides_result.scalar() or 0
+
+    active_today_result = await db.execute(
+        sa.text("SELECT COUNT(*) FROM users WHERE last_login >= NOW() - INTERVAL '1 day'")
+    )
+    active_users_today = active_today_result.scalar() or 0
+
+    success_rate = round((done_conversions / total_conversions * 100), 1) if total_conversions > 0 else 0.0
 
     return AdminMetrics(
         total_users=total_users,
+        active_users_today=active_users_today,
         total_conversions=total_conversions,
+        done_conversions=done_conversions,
         conversions_today=conversions_today,
         failed_today=failed,
-        ai_cost_today_usd=ai_cost,
+        total_slides=total_slides,
+        success_rate=success_rate,
+        ai_cost_today_usd=float(tokens_today) * 0.000003,
+        ai_cost_total_usd=float(total_tokens) * 0.000003,
+        total_tokens=total_tokens,
     )
 
 
