@@ -117,7 +117,11 @@ def validate_slides(raw: dict) -> list[dict]:
                 left = bullets_raw[:mid] or ["Key point"]
                 right = bullets_raw[mid:] or ["Key point"]
                 bullets = ["## Key Points"] + left + ["## Details"] + right
-        else:  # hero, bullets
+        elif layout == "hero":
+            bullets = bullets_raw[:2]
+            if not bullets:
+                bullets = ["Subtitle or tagline"]
+        else:  # bullets
             bullets = bullets_raw[:6]
             while len(bullets) < 3:
                 bullets.append("Key point")

@@ -165,6 +165,16 @@ async def create_conversion(
             raw_response, tokens_used = await claude.call_claude(system_prompt, doc_text)
             validated = claude.validate_slides(raw_response)
 
+        # Always append a Thank You closing slide
+        validated.append({
+            "layout": "hero",
+            "title": "Thank You",
+            "bullets": ["Questions & Discussion"],
+            "speaker_notes": "Thank the audience for their time and attention. Open the floor for questions and discussion. Share your contact details if needed.",
+            "color_scheme": "default",
+            "shape_style": "square",
+        })
+
         # Save slides
         for i, slide_data in enumerate(validated):
             slide = Slide(
@@ -181,15 +191,17 @@ async def create_conversion(
             )
             db.add(slide)
 
+        presentation_name = validated[0].get("title", "").strip() if validated else ""
         await db.execute(
             sa.text(
                 "UPDATE conversions SET status='done', tokens_used=:tokens, "
-                "completed_at=:completed, slide_count=:sc WHERE id=:id"
+                "completed_at=:completed, slide_count=:sc, name=:name WHERE id=:id"
             ),
             {
                 "tokens": tokens_used,
                 "completed": datetime.now(timezone.utc),
                 "sc": len(validated),
+                "name": presentation_name or None,
                 "id": str(conv.id),
             },
         )
