@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import get_settings
-from app.routers import auth, uploads, conversions, slides, export, users, admin
+from app.routers import auth, uploads, conversions, slides, export, users, admin, templates
 
 settings = get_settings()
 
@@ -30,6 +30,7 @@ app.include_router(slides.router, prefix=PREFIX)
 app.include_router(export.router, prefix=PREFIX)
 app.include_router(users.router, prefix=PREFIX)
 app.include_router(admin.router, prefix=PREFIX)
+app.include_router(templates.router, prefix=PREFIX)
 
 
 @app.get("/health")

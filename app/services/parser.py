@@ -206,9 +206,84 @@ def parse_text(text: str) -> ParsedDocument:
     ))
 
 
+def parse_pptx(data: bytes) -> ParsedDocument:
+    import io as _io
+    from pptx import Presentation
+
+    prs = Presentation(_io.BytesIO(data))
+    sections: list[Section] = []
+    all_text: list[str] = []
+
+    try:
+        raw_count = len(prs.slides._sldIdLst)
+    except Exception:
+        raw_count = len(prs.slides)
+
+    for i in range(raw_count):
+        try:
+            slide = prs.slides[i]
+        except Exception:
+            continue
+
+        slide_title = ""
+        slide_bullets: list[str] = []
+
+        for shape in slide.shapes:
+            try:
+                if not shape.has_text_frame:
+                    continue
+                # Check if this shape is a title placeholder
+                is_title_ph = False
+                if hasattr(shape, "placeholder_format") and shape.placeholder_format is not None:
+                    ph_idx = shape.placeholder_format.idx
+                    is_title_ph = ph_idx == 0  # only idx=0 is title
+
+                text = shape.text_frame.text.strip()
+                if not text:
+                    continue
+
+                if is_title_ph and not slide_title:
+                    slide_title = text
+                else:
+                    for para in shape.text_frame.paragraphs:
+                        line = para.text.strip()
+                        if line and line != slide_title:
+                            slide_bullets.append(line)
+            except Exception:
+                continue
+
+        # Speaker notes as extra context
+        try:
+            if slide.has_notes_slide:
+                notes_text = slide.notes_slide.notes_text_frame.text.strip()
+                if notes_text:
+                    slide_bullets.append(f"[Notes: {notes_text[:300]}]")
+        except Exception:
+            pass
+
+        heading = slide_title or f"Slide {i + 1}"
+        all_text.append(heading)
+        all_text.extend(slide_bullets)
+        sections.append(Section(heading=heading, bullets=slide_bullets))
+
+    raw_text = "\n".join(all_text)
+    word_count = len(raw_text.split())
+
+    if word_count < 10:
+        # PPTX has no extractable text (image-only slides)
+        raw_text = f"Presentation with {raw_count} slides. No extractable text found."
+        word_count = len(raw_text.split())
+        sections = [Section(heading="Presentation", paragraphs=[raw_text])]
+
+    title = sections[0].heading if sections else "Presentation"
+    return ParsedDocument(title=title, sections=sections, word_count=word_count, raw_text=raw_text)
+
+
 MIME_PARSERS = {
     "application/pdf": parse_pdf,
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document": parse_docx,
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation": parse_pptx,
+    "application/vnd.ms-powerpoint": parse_pptx,
     "text/plain": parse_text,
     "text/markdown": parse_text,
 }

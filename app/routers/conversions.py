@@ -178,30 +178,18 @@ async def list_conversions(
     current_user: User = Depends(get_current_user),
 ):
     offset = (page - 1) * page_size
-    is_admin = current_user.role == "admin"
-
-    if is_admin:
-        total_result = await db.execute(sa.text("SELECT COUNT(*) FROM conversions"))
-        total = total_result.scalar() or 0
-        result = await db.execute(
-            sa.select(Conversion)
-            .order_by(Conversion.created_at.desc())
-            .offset(offset)
-            .limit(page_size)
-        )
-    else:
-        total_result = await db.execute(
-            sa.text("SELECT COUNT(*) FROM conversions WHERE user_id = :uid"),
-            {"uid": str(current_user.id)},
-        )
-        total = total_result.scalar() or 0
-        result = await db.execute(
-            sa.select(Conversion)
-            .where(Conversion.user_id == current_user.id)
-            .order_by(Conversion.created_at.desc())
-            .offset(offset)
-            .limit(page_size)
-        )
+    total_result = await db.execute(
+        sa.text("SELECT COUNT(*) FROM conversions WHERE user_id = :uid"),
+        {"uid": str(current_user.id)},
+    )
+    total = total_result.scalar() or 0
+    result = await db.execute(
+        sa.select(Conversion)
+        .where(Conversion.user_id == current_user.id)
+        .order_by(Conversion.created_at.desc())
+        .offset(offset)
+        .limit(page_size)
+    )
 
     convs = result.scalars().all()
     return ConversionListResponse(

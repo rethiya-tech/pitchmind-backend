@@ -30,7 +30,7 @@ async def _load_slides_for_export(conversion_id: str, current_user: User, db: As
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Conversion not found"})
 
     conv = await db.get(Conversion, cid)
-    if not conv or conv.user_id != current_user.id:
+    if not conv or (conv.user_id != current_user.id and current_user.role != "admin"):
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Conversion not found"})
 
     result = await db.execute(
