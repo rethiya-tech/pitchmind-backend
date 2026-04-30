@@ -21,6 +21,12 @@ class Slide(Base):
     layout: Mapped[str] = mapped_column(
         String(50), nullable=False, server_default="bullets", default="bullets",
     )
+    color_scheme: Mapped[str] = mapped_column(
+        String(20), nullable=False, server_default="default", default="default",
+    )
+    shape_style: Mapped[str] = mapped_column(
+        String(20), nullable=False, server_default="square", default="square",
+    )
     title: Mapped[str | None] = mapped_column(String(500), nullable=True)
     bullets: Mapped[Any] = mapped_column(
         JSONB, nullable=False, server_default="[]", default=list,

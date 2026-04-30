@@ -147,6 +147,8 @@ async def create_conversion(
                 title=slide_data.get("title", ""),
                 bullets=slide_data.get("bullets", []),
                 speaker_notes=slide_data.get("speaker_notes", ""),
+                color_scheme=slide_data.get("color_scheme", "default"),
+                shape_style=slide_data.get("shape_style", "square"),
                 is_deleted=False,
             )
             db.add(slide)
@@ -292,6 +294,8 @@ async def insert_slide(
         title=body.title,
         bullets=body.bullets,
         speaker_notes=body.speaker_notes,
+        color_scheme=body.color_scheme,
+        shape_style=body.shape_style,
         is_deleted=False,
     )
     db.add(slide)
@@ -424,6 +428,8 @@ async def stream_conversion(
                 "title": slide.title,
                 "bullets": slide.bullets,
                 "speaker_notes": slide.speaker_notes,
+                "color_scheme": slide.color_scheme,
+                "shape_style": slide.shape_style,
             }
             yield f"event: slide_done\ndata: {json.dumps({'slide': slide_data})}\n\n"
             yield f"event: progress\ndata: {json.dumps({'completed': i + 1, 'total': total})}\n\n"
@@ -456,6 +462,8 @@ class SlideInsertBody(BaseModel):
     bullets: list[str] = []
     speaker_notes: str = ""
     layout: str = "bullets"
+    color_scheme: str = "default"
+    shape_style: str = "square"
 
 
 class SlideReorderBody(BaseModel):

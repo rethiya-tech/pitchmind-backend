@@ -69,6 +69,8 @@ class SlideOut(BaseModel):
     bullets: list[str]
     speaker_notes: str | None
     is_deleted: bool
+    color_scheme: str = "default"
+    shape_style: str = "square"
     updated_at: datetime
 
     model_config = {"from_attributes": True}

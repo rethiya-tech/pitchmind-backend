@@ -1,9 +1,12 @@
 import json
+import logging
 import re
 
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from app.core.config import get_settings
+
+_log = logging.getLogger(__name__)
 
 SYSTEM_PROMPT_TEMPLATE = """\
 You are a professional presentation generator. Convert the provided document into a structured slide deck.
@@ -25,7 +28,7 @@ JSON schema:
 LAYOUT SELECTION — choose based on slide content:
 - hero: ONLY the first slide. Large title + subtitle. bullets[0] = subtitle/tagline.
 - data_table: detailed metrics tables with 4+ rows. Format EVERY bullet as "Label: Value" (e.g. "Revenue: $5.2M", "Status: Completed").
-- two_column: comparing two things — pros vs cons, before vs after, two options. Equal bullets per side.
+- two_column: comparing two things. Column headers are set by "## Header" bullets. Format: ["## Left Header", "point 1", "point 2", "## Right Header", "point 3", "point 4"]. Equal content bullets per side.
 - timeline: phases, stages, milestones, or sequences. Format EVERY bullet as "Phase: Description" (e.g. "Q1: Market research completed"). Min 3, max 6 items.
 - big_stat: 2–3 key metrics worth highlighting with large numbers. Format EVERY bullet as "Label: Value" (e.g. "Revenue Growth: +47%"). Use EXACTLY 2 or 3 bullets.
 - process: workflows, procedures, numbered steps. Each bullet = one step. Min 3, max 5 steps.
@@ -103,7 +106,18 @@ def validate_slides(raw: dict) -> list[dict]:
             bullets = bullets_raw[:2]
             while len(bullets) < 1:
                 bullets.append("Insert quote here")
-        else:  # hero, bullets, two_column
+        elif layout == "two_column":
+            # Ensure ## header markers are present
+            has_headers = any(b.startswith("## ") for b in bullets_raw)
+            if has_headers:
+                bullets = bullets_raw[:8]
+            else:
+                # Wrap legacy bullets with default headers
+                mid = len(bullets_raw) // 2 or 1
+                left = bullets_raw[:mid] or ["Key point"]
+                right = bullets_raw[mid:] or ["Key point"]
+                bullets = ["## Key Points"] + left + ["## Details"] + right
+        else:  # hero, bullets
             bullets = bullets_raw[:6]
             while len(bullets) < 3:
                 bullets.append("Key point")
@@ -117,11 +131,150 @@ def validate_slides(raw: dict) -> list[dict]:
     return out
 
 
+_VALID_COLOR_SCHEMES = {"default", "teal", "blue", "purple", "amber", "rose", "green", "orange"}
+_VALID_SHAPE_STYLES = {"square", "rounded", "pill"}
+
+
+async def enhance_slide(instruction: str, slide_data: dict) -> dict:
+    """Apply a free-form user instruction to a slide and return changed fields."""
+    title = slide_data.get("title", "")
+    bullets = slide_data.get("bullets", [])
+    notes = slide_data.get("speaker_notes", "")
+    layout = slide_data.get("layout", "bullets")
+    color_scheme = slide_data.get("color_scheme", "default")
+    shape_style = slide_data.get("shape_style", "square")
+    bullets_str = "\n".join(f"  - {b}" for b in bullets)
+
+    prompt = f"""\
+You are editing a single presentation slide. Apply the user's instruction and return ONLY the fields that changed.
+
+Current slide:
+  Layout: {layout}
+  Title: {title}
+  Bullets:
+{bullets_str}
+  Speaker Notes: {notes[:300] if notes else "(none)"}
+  Color Scheme: {color_scheme}
+  Shape Style: {shape_style}
+
+User instruction: "{instruction}"
+
+Rules:
+- Return ONLY valid JSON — no markdown, no explanation, start with {{ and end with }}
+- Include ONLY fields that need to change: "title", "bullets", "speaker_notes", "layout", "color_scheme", "shape_style"
+- title: max 10 words
+- bullets: each max 15 words; keep same count unless instruction says otherwise
+- layout options: hero | bullets | two_column | data_table | timeline | big_stat | process | quote
+- color_scheme options: default | teal | blue | purple | amber | rose | green | orange
+- shape_style options: square | rounded | pill
+- If changing layout, reformat bullets to match:
+    timeline → "Phase: Description"
+    data_table / big_stat → "Label: Value"
+    process → each bullet is one numbered step
+    quote → bullets[0] = quote text, bullets[1] = attribution
+- two_column: column headers are "## Header" bullets. Format: ["## Left Header", "content", "content", "## Right Header", "content", "content"]
+  To rename a column header (e.g. "change Key Points to Strengths"), update the "## " bullet text only
+  Content bullets have NO prefix — write them as plain points without "Label: " repetition
+- "make rounded" or "round corners" → set shape_style to "rounded"
+- "pill shape" or "very rounded" → set shape_style to "pill"
+- "square" or "sharp corners" → set shape_style to "square"
+- Color instructions map to color_scheme: "blue" → "blue", "purple" → "purple", "amber/orange/warm" → "amber", "red/rose/pink" → "rose", "teal/green" → "teal", "reset color" → "default"
+
+Return example: {{"color_scheme": "blue", "shape_style": "rounded"}}"""
+
+    result_text = await _call_ai_text(prompt, max_tokens=2048)
+    result_text = strip_fences(result_text).strip()
+    _log.info("enhance_slide raw response: %r", result_text[:500])
+    start = result_text.find('{')
+    if start == -1:
+        raise ValueError(f"No JSON object in response: {result_text[:200]}")
+    try:
+        parsed, _ = json.JSONDecoder().raw_decode(result_text, start)
+    except json.JSONDecodeError as exc:
+        _log.error("enhance_slide JSON parse failed. raw=%r", result_text[:500])
+        raise ValueError(f"AI returned malformed JSON: {exc.msg}") from exc
+    if not isinstance(parsed, dict):
+        raise ValueError("Expected JSON object")
+
+    out: dict = {}
+    if "title" in parsed and isinstance(parsed["title"], str):
+        out["title"] = " ".join(parsed["title"].split()[:10])
+    if "bullets" in parsed and isinstance(parsed["bullets"], list):
+        out["bullets"] = [str(b)[:120] for b in parsed["bullets"][:7]]
+    if "speaker_notes" in parsed and isinstance(parsed["speaker_notes"], str):
+        out["speaker_notes"] = parsed["speaker_notes"][:800]
+    if "layout" in parsed and parsed["layout"] in (
+        "hero", "bullets", "two_column", "data_table", "timeline", "big_stat", "process", "quote"
+    ):
+        out["layout"] = parsed["layout"]
+    if "color_scheme" in parsed and parsed["color_scheme"] in _VALID_COLOR_SCHEMES:
+        out["color_scheme"] = parsed["color_scheme"]
+    if "shape_style" in parsed and parsed["shape_style"] in _VALID_SHAPE_STYLES:
+        out["shape_style"] = parsed["shape_style"]
+    return out
+
+
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10), reraise=True)
+async def _call_ai_text(prompt: str, max_tokens: int = 512) -> str:
+    """Call AI with a plain prompt and return raw text."""
+    settings = get_settings()
+
+    if settings.GEMINI_API_KEY:
+        from google import genai
+        from google.genai import types
+        client = genai.Client(api_key=settings.GEMINI_API_KEY)
+        safety_off = [
+            types.SafetySetting(category="HARM_CATEGORY_HARASSMENT", threshold="BLOCK_NONE"),
+            types.SafetySetting(category="HARM_CATEGORY_HATE_SPEECH", threshold="BLOCK_NONE"),
+            types.SafetySetting(category="HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold="BLOCK_NONE"),
+            types.SafetySetting(category="HARM_CATEGORY_DANGEROUS_CONTENT", threshold="BLOCK_NONE"),
+        ]
+        response = await client.aio.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                safety_settings=safety_off,
+            ),
+        )
+        text = None
+        finish_reason = None
+        try:
+            if response.candidates:
+                finish_reason = str(getattr(response.candidates[0], 'finish_reason', ''))
+            text = response.text
+        except Exception:
+            pass
+        if not text:
+            try:
+                text = response.candidates[0].content.parts[0].text
+            except Exception:
+                pass
+        if not text:
+            _log.error("Gemini returned empty response. finish_reason=%s", finish_reason)
+            raise ValueError("AI returned an empty response — please try again")
+        _log.error("Gemini finish_reason=%s text_len=%d", finish_reason, len(text))
+        return text.strip()
+
+    if not _is_placeholder_anthropic_key(settings.ANTHROPIC_API_KEY):
+        from anthropic import AsyncAnthropic
+        client = AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
+        response = await client.messages.create(
+            model="claude-sonnet-4-5",
+            max_tokens=max_tokens,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return response.content[0].text.strip()
+
+    raise ValueError("No AI API key configured")
+
+
 def friendly_error(exc: Exception) -> str:
     msg = str(exc)
     low = msg.lower()
     if "429" in msg or "resource_exhausted" in low or "quota" in low or "rate_limit" in low:
         return "AI quota exceeded — please wait a few minutes and try again."
+    if "503" in msg or "unavailable" in low or "high demand" in low or "overloaded" in low:
+        return "AI service is busy — please try again in a moment."
     if "401" in msg or "api_key" in low or "invalid key" in low or "unauthenticated" in low:
         return "AI API key is invalid or missing. Please check your configuration."
     if "timeout" in low or "timed out" in low or "deadline" in low:
@@ -144,6 +297,8 @@ def _stub_slides(system: str, slide_count: int) -> tuple[dict, int]:
             "title": "Presentation Title",
             "bullets": ["Subtitle or tagline goes here", "Generated in development mode", "Add a real API key for AI generation"],
             "speaker_notes": "This is the opening slide. Welcome the audience and introduce the main topic. Provide context for why this presentation matters and what the audience will learn.",
+            "color_scheme": "default",
+            "shape_style": "square",
         }
     ]
     section_titles = [
@@ -159,6 +314,8 @@ def _stub_slides(system: str, slide_count: int) -> tuple[dict, int]:
             "title": title,
             "bullets": [f"Key insight {j + 1} related to {title.lower()}" for j in range(4)],
             "speaker_notes": f"Discuss the details of {title.lower()}. Provide supporting data and context. Engage the audience with relevant examples.",
+            "color_scheme": "default",
+            "shape_style": "square",
         })
     return {"slides": slides[:n]}, 0
 
@@ -169,7 +326,7 @@ async def _call_gemini(system: str, user_message: str) -> tuple[dict, int]:
     settings = get_settings()
     client = genai.Client(api_key=settings.GEMINI_API_KEY)
     response = await client.aio.models.generate_content(
-        model="gemini-flash-latest",
+        model="gemini-2.5-flash",
         contents=user_message,
         config=types.GenerateContentConfig(
             system_instruction=system,
