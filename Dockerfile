@@ -14,11 +14,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=builder /install /usr/local
 COPY . .
 RUN useradd -m -u 1001 pitchmind && chown -R pitchmind:pitchmind /app
+RUN chmod +x /app/start.sh
 USER pitchmind
 EXPOSE 8000
-HEALTHCHECK --interval=30s --timeout=10s --start-period=15s \
-  CMD curl -f http://localhost:8000/api/v1/health || exit 1
-CMD ["gunicorn", "app.main:app", \
-     "-w", "4", "-k", "uvicorn.workers.UvicornWorker", \
-     "--bind", "0.0.0.0:8000", "--timeout", "120", \
-     "--access-logfile", "-", "--error-logfile", "-"]
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s \
+  CMD curl -f http://localhost:${PORT:-8000}/health || exit 1
+CMD ["/app/start.sh"]
