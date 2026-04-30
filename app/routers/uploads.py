@@ -29,7 +29,6 @@ async def presign_upload(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    settings = get_settings()
     gcs_key = gcs.generate_upload_key(str(current_user.id), body.filename)
 
     upload = Upload(
@@ -44,16 +43,10 @@ async def presign_upload(
     db.add(upload)
     await db.flush()
 
-    if gcs.is_configured():
-        upload_url = gcs.get_signed_upload_url(
-            bucket=settings.GCS_BUCKET,
-            key=gcs_key,
-            content_type=body.content_type,
-        )
-    else:
-        # Local dev fallback: route PUT through backend
-        base = str(request.base_url).rstrip("/")
-        upload_url = f"{base}/api/v1/uploads/{upload.id}/local"
+    # Always route the PUT through the backend so the browser never talks to GCS
+    # directly. This avoids the need to configure GCS CORS for the frontend domain.
+    base = str(request.base_url).rstrip("/")
+    upload_url = f"{base}/api/v1/uploads/{upload.id}/local"
 
     return PresignResponse(
         upload_url=upload_url,
@@ -63,17 +56,38 @@ async def presign_upload(
 
 
 @router.put("/{upload_id}/local", include_in_schema=False)
-async def local_upload(upload_id: str, request: Request):
-    """Dev-only endpoint: accepts raw file body and stores it locally."""
+async def local_upload(
+    upload_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Accepts raw file body, stores locally or uploads to GCS if configured."""
     try:
         uid = uuid.UUID(upload_id)
     except ValueError:
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Upload not found"})
 
+    upload = await db.get(Upload, uid)
+    if not upload or upload.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Upload not found"})
+
     data = await request.body()
-    dest = gcs.local_upload_path(str(uid))
-    dest.write_bytes(data)
-    return {}
+    if not data:
+        raise HTTPException(status_code=400, detail={"code": "EMPTY_BODY", "message": "No file data received"})
+
+    settings = get_settings()
+    if gcs.is_configured():
+        gcs.upload_bytes(settings.GCS_BUCKET, upload.gcs_key, data, upload.mime_type)
+    else:
+        gcs.local_upload_path(str(uid)).write_bytes(data)
+
+    await db.execute(
+        sa.text("UPDATE uploads SET parse_status='done' WHERE id=:id"),
+        {"id": str(uid)},
+    )
+
+    return {"upload_id": str(uid), "status": "received"}
 
 
 @router.post("/{upload_id}/confirm", response_model=ConfirmResponse)
