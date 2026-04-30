@@ -210,41 +210,33 @@ async def copy_template(
     slides_data = t.slides_json if isinstance(t.slides_json, list) else []
     slide_count = len(slides_data)
 
-    # If template has no extractable content, use AI to generate starter slides
+    # Check if template has real extractable content
     has_content = any(
-        s.get("title", "").strip() and not s.get("title", "").startswith("Slide ")
+        (s.get("title", "").strip() and not s.get("title", "").startswith("Slide "))
         or s.get("bullets")
         for s in slides_data
     )
 
+    # For image-based templates with no text, generate a proper pitch deck structure
     if not has_content and slide_count > 0:
         from app.services import claude as claude_svc
-        system = claude_svc.build_system_prompt(
-            style="professional",
-            audience_level="executive",
-            slide_count=slide_count,
-        )
-        user_msg = (
-            f"Generate a {slide_count}-slide presentation for a template called '{t.name}'. "
-            f"Use the template's theme '{t.theme or 'clean_slate'}' as context for the style. "
-            f"Create professional, polished slide content that can be edited by the user."
-        )
-        ai_slides: list[dict] = []
-        try:
-            raw, _ = await claude_svc.call_claude(system, user_msg)
-            ai_slides = claude_svc.validate_slides(raw)
-        except Exception:
-            # AI failed — use deterministic stub slides so the editor is never empty
-            stub_raw, _ = claude_svc._stub_slides(system, slide_count)
-            ai_slides = claude_svc.validate_slides(stub_raw)
-
-        # Merge: keep positions from template, fill title/bullets from AI or stub
+        system = claude_svc.build_system_prompt("professional", "executive", slide_count)
+        stub_raw, _ = claude_svc._stub_slides(system, slide_count)
+        ai_slides = claude_svc.validate_slides(stub_raw)
         for i, ai_slide in enumerate(ai_slides[:slide_count]):
             if i < len(slides_data):
-                slides_data[i]["title"] = ai_slide.get("title", slides_data[i].get("title", ""))
+                slides_data[i]["title"] = ai_slide.get("title", "")
                 slides_data[i]["bullets"] = ai_slide.get("bullets", [])
                 slides_data[i]["speaker_notes"] = ai_slide.get("speaker_notes", "")
-                slides_data[i]["layout"] = ai_slide.get("layout", slides_data[i].get("layout", "bullets"))
+                slides_data[i]["layout"] = ai_slide.get("layout", "bullets")
+
+    # Normalise any missing fields
+    for i, s in enumerate(slides_data):
+        if not s.get("title"):
+            s["title"] = f"Slide {i + 1}"
+        s.setdefault("bullets", [])
+        s.setdefault("speaker_notes", "")
+        s.setdefault("layout", "bullets")
 
     # Create conversion record
     conv_id = uuid.uuid4()
