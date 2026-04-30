@@ -178,7 +178,6 @@ async def create_conversion(
             speaker_notes=body.speaker_notes,
         )
         db.add(conv)
-        await db.flush()
         doc_text = body.prompt_text
 
     # ── File upload mode ──────────────────────────────────────────────────────
@@ -200,7 +199,6 @@ async def create_conversion(
             speaker_notes=body.speaker_notes,
         )
         db.add(conv)
-        await db.flush()
 
         # Parse document if not already done (fast, happens before returning)
         if not upload.parsed_doc and not upload.parsed_preview:
@@ -225,7 +223,6 @@ async def create_conversion(
             except Exception:
                 await db.rollback()
                 db.add(conv)
-                await db.flush()
                 upload = await db.get(Upload, body.upload_id)
 
         if upload and upload.parsed_doc:
@@ -258,9 +255,7 @@ async def create_conversion(
                         "speaker_notes": "",
                     })
 
-    # Commit the conversion record immediately, then start AI generation in background
-    await db.commit()
-
+    # Schedule background task — get_db() will auto-commit before it runs
     asyncio.create_task(_generate_slides_task(
         conv_id=conv.id,
         doc_text=doc_text,
