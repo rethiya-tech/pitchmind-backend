@@ -1,5 +1,4 @@
 import asyncio
-import ssl
 from logging.config import fileConfig
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
@@ -18,8 +17,7 @@ if db_url.startswith("postgres://"):
     db_url = db_url.replace("postgres://", "postgresql+asyncpg://", 1)
 elif db_url.startswith("postgresql://"):
     db_url = db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
-# Strip ?ssl=require — we handle SSL via connect_args below
-db_url = db_url.split("?")[0]
+# Keep ?ssl params as-is for the URL
 
 config.set_main_option("sqlalchemy.url", db_url)
 
@@ -48,14 +46,9 @@ def do_run_migrations(connection: Connection) -> None:
 
 
 async def run_async_migrations() -> None:
-    ssl_ctx = ssl.create_default_context()
-    ssl_ctx.check_hostname = False
-    ssl_ctx.verify_mode = ssl.CERT_NONE
-
     connectable = create_async_engine(
         db_url,
         poolclass=pool.NullPool,
-        connect_args={"ssl": ssl_ctx},
     )
     async with connectable.connect() as connection:
         await connection.run_sync(do_run_migrations)
