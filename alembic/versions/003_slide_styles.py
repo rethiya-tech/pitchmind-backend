@@ -1,14 +1,14 @@
 """Add color_scheme and shape_style to slides
 
-Revision ID: 003
-Revises: 002
+Revision ID: 003b
+Revises: 003
 Create Date: 2024-01-03 00:00:00.000000
 """
 from alembic import op
 import sqlalchemy as sa
 
-revision = '003'
-down_revision = '002'
+revision = '003b'
+down_revision = '003'
 branch_labels = None
 depends_on = None
 
