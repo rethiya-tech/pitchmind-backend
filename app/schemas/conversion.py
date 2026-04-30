@@ -84,6 +84,7 @@ class ConversionOut(BaseModel):
     slide_count: int | None
     audience_level: str | None
     original_filename: str | None
+    name: str | None = None
     tokens_used: int
     created_at: datetime
     completed_at: datetime | None

@@ -18,6 +18,7 @@ class Conversion(Base):
     user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     upload_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     original_filename: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    name: Mapped[str | None] = mapped_column(String(300), nullable=True)
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, server_default="pending", default="pending",
     )
