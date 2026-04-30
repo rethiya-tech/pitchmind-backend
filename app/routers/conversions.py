@@ -165,6 +165,16 @@ async def create_conversion(
             raw_response, tokens_used = await claude.call_claude(system_prompt, doc_text)
             validated = claude.validate_slides(raw_response)
 
+        # Always append a Thank You closing slide
+        validated.append({
+            "layout": "hero",
+            "title": "Thank You",
+            "bullets": ["Questions & Discussion"],
+            "speaker_notes": "Thank the audience for their time and attention. Open the floor for questions and discussion. Share your contact details if needed.",
+            "color_scheme": "default",
+            "shape_style": "square",
+        })
+
         # Save slides
         for i, slide_data in enumerate(validated):
             slide = Slide(
