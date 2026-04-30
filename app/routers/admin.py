@@ -12,12 +12,14 @@ from app.schemas.admin import (
     AdminConversionListResponse,
     AdminConversionOut,
     AdminMetrics,
+    AdminUserCreate,
     AdminUserListResponse,
     AdminUserOut,
     AdminUserPatch,
     AuditLogEntry,
     AuditLogListResponse,
 )
+from app.core.security import hash_password
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -176,6 +178,46 @@ async def get_user(
     )
 
 
+@router.post("/users", status_code=201, response_model=AdminUserOut)
+async def create_user(
+    body: AdminUserCreate,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    existing = await db.execute(sa.text("SELECT id FROM users WHERE email = :email"), {"email": body.email})
+    if existing.fetchone():
+        raise HTTPException(status_code=409, detail={"code": "EMAIL_EXISTS", "message": "Email already registered"})
+
+    if body.role not in ("user", "admin"):
+        raise HTTPException(status_code=422, detail={"code": "INVALID_ROLE", "message": "Role must be user or admin"})
+
+    new_id = str(uuid.uuid4())
+    await db.execute(
+        sa.text(
+            "INSERT INTO users (id, email, password_hash, name, role, is_active, created_at) "
+            "VALUES (:id, :email, :password_hash, :name, :role, true, NOW())"
+        ),
+        {
+            "id": new_id,
+            "email": body.email,
+            "password_hash": hash_password(body.password),
+            "name": body.name,
+            "role": body.role,
+        },
+    )
+    await db.flush()
+
+    return AdminUserOut(
+        id=uuid.UUID(new_id),
+        email=body.email,
+        name=body.name,
+        role=body.role,
+        is_active=True,
+        created_at=__import__("datetime").datetime.utcnow(),
+        conversion_count=0,
+    )
+
+
 @router.patch("/users/{user_id}", response_model=AdminUserOut)
 async def patch_user(
     user_id: str,
@@ -195,11 +237,25 @@ async def patch_user(
     if not user:
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "User not found"})
 
+    if body.email is not None:
+        existing = await db.execute(
+            sa.text("SELECT id FROM users WHERE email = :email AND id != :id"),
+            {"email": body.email, "id": str(uid)},
+        )
+        if existing.fetchone():
+            raise HTTPException(status_code=409, detail={"code": "EMAIL_EXISTS", "message": "Email already in use"})
+
     updates: dict = {}
     if body.is_active is not None:
         updates["is_active"] = body.is_active
     if body.role is not None:
         updates["role"] = body.role
+    if body.name is not None:
+        updates["name"] = body.name
+    if body.email is not None:
+        updates["email"] = body.email
+    if body.password is not None:
+        updates["password_hash"] = hash_password(body.password)
 
     if updates:
         set_clauses = ", ".join(f"{k} = :{k}" for k in updates)

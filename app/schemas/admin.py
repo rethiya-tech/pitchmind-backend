@@ -37,7 +37,17 @@ class AdminUserListResponse(BaseModel):
     page: int
 
 
+class AdminUserCreate(BaseModel):
+    email: str
+    password: str
+    name: str | None = None
+    role: str = "user"
+
+
 class AdminUserPatch(BaseModel):
+    name: str | None = None
+    email: str | None = None
+    password: str | None = None
     is_active: bool | None = None
     role: str | None = None
 
