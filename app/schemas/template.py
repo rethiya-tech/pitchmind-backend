@@ -21,6 +21,8 @@ class TemplateOut(BaseModel):
     slide_count: int
     theme: str | None
     is_active: bool
+    is_public: bool
+    created_by: uuid.UUID | None
     created_at: datetime
     parse_warning: str | None = None
 

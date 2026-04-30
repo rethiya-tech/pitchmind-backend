@@ -97,3 +97,41 @@ def local_upload_path(upload_id: str) -> Path:
 
 def local_blob_exists(upload_id: str) -> bool:
     return local_upload_path(upload_id).exists()
+
+
+def read_pptx_key_bytes(pptx_key: str) -> bytes | None:
+    """Read bytes for a template file from GCS or local dev.
+
+    pptx_key format: 'templates/{uuid}.pptx'
+    Local path maps to: LOCAL_UPLOAD_DIR / 'template_{uuid}.pptx'
+    """
+    if is_configured():
+        settings = get_settings()
+        try:
+            return download_bytes(settings.GCS_BUCKET, pptx_key)
+        except Exception:
+            return None
+    else:
+        filename = pptx_key.replace("templates/", "template_")
+        local_path = LOCAL_UPLOAD_DIR / filename
+        if local_path.exists():
+            return local_path.read_bytes()
+        return None
+
+
+def read_upload_bytes(gcs_key: str, upload_id: str) -> bytes | None:
+    """Read bytes for a user-uploaded file from GCS or local dev.
+
+    Local uploads are stored as LOCAL_UPLOAD_DIR / upload_id (no extension).
+    """
+    if is_configured():
+        settings = get_settings()
+        try:
+            return download_bytes(settings.GCS_BUCKET, gcs_key)
+        except Exception:
+            return None
+    else:
+        local_path = local_upload_path(upload_id)
+        if local_path.exists():
+            return local_path.read_bytes()
+        return None

@@ -86,6 +86,7 @@ class ConversionOut(BaseModel):
     original_filename: str | None
     name: str | None = None
     tokens_used: int
+    source_pptx_key: str | None = None
     created_at: datetime
     completed_at: datetime | None
 

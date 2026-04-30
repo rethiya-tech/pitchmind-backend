@@ -24,6 +24,7 @@ class Template(Base):
     slides_json: Mapped[Any] = mapped_column(JSONB, nullable=False, server_default="[]", default=list)
     theme: Mapped[str | None] = mapped_column(String(50), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    is_public: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), server_default=text("NOW()"), nullable=False,

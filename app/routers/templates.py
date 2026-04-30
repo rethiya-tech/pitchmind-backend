@@ -93,16 +93,16 @@ def _parse_pptx_slides(file_bytes: bytes) -> tuple[list[dict], str | None]:
         return [], str(e)
 
 
-# ── Admin: upload a template ──────────────────────────────────────────────────
+# ── Upload a template (admin → public; user → private) ───────────────────────
 
 @router.post("", status_code=201, response_model=TemplateOut)
 async def upload_template(
     name: str = Form(...),
     description: str = Form(""),
-    theme: str = Form("clean_slate"),
+    theme: str = Form(""),
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
-    admin: User = Depends(require_admin),
+    current_user: User = Depends(get_current_user),
 ):
     if file.content_type not in ALLOWED_MIME and not (file.filename or "").endswith(".pptx"):
         raise HTTPException(status_code=415, detail={"code": "INVALID_TYPE", "message": "Only .pptx files are accepted"})
@@ -117,14 +117,13 @@ async def upload_template(
     gcs_key = f"templates/{template_id}.pptx"
 
     if _gcs.is_configured():
-        from app.core.config import get_settings
-        settings = get_settings()
         _gcs.upload_bytes(gcs_key, file_bytes, content_type="application/vnd.openxmlformats-officedocument.presentationml.presentation")
     else:
         local_path = _gcs.LOCAL_UPLOAD_DIR / f"template_{template_id}.pptx"
         _gcs.LOCAL_UPLOAD_DIR.mkdir(exist_ok=True)
         local_path.write_bytes(file_bytes)
 
+    is_admin = current_user.role == "admin"
     template = Template(
         id=template_id,
         name=name,
@@ -132,13 +131,14 @@ async def upload_template(
         pptx_key=gcs_key,
         slide_count=len(slides),
         slides_json=slides,
-        theme=theme,
+        theme=theme or None,
         is_active=True,
-        created_by=admin.id,
+        is_public=is_admin,
+        created_by=current_user.id,
     )
     db.add(template)
-    await log_event(db, "template.created", actor_id=admin.id, target_type="template", target_id=template_id,
-                    metadata={"name": name, "slides": len(slides)})
+    await log_event(db, "template.created", actor_id=current_user.id, target_type="template", target_id=template_id,
+                    metadata={"name": name, "slides": len(slides), "is_public": is_admin})
     await db.commit()
     await db.refresh(template)
     out = TemplateOut.model_validate(template)
@@ -147,22 +147,27 @@ async def upload_template(
     return out
 
 
-# ── List templates (all authenticated users) ──────────────────────────────────
+# ── List templates (public + user's own private) ──────────────────────────────
 
 @router.get("", response_model=TemplateListResponse)
 async def list_templates(
     page: int = 1,
     page_size: int = 20,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     offset = (page - 1) * page_size
-    total_r = await db.execute(sa.text("SELECT COUNT(*) FROM templates WHERE is_active = true"))
+    visibility = sa.or_(Template.is_public == True, Template.created_by == current_user.id)
+
+    total_r = await db.execute(
+        sa.select(sa.func.count()).select_from(Template)
+        .where(Template.is_active == True, visibility)
+    )
     total = total_r.scalar() or 0
 
     result = await db.execute(
         sa.select(Template)
-        .where(Template.is_active == True)
+        .where(Template.is_active == True, visibility)
         .order_by(Template.created_at.desc())
         .offset(offset)
         .limit(page_size)
@@ -210,25 +215,7 @@ async def copy_template(
     slides_data = t.slides_json if isinstance(t.slides_json, list) else []
     slide_count = len(slides_data)
 
-    # Check if template has real extractable content
-    has_content = any(
-        (s.get("title", "").strip() and not s.get("title", "").startswith("Slide "))
-        or s.get("bullets")
-        for s in slides_data
-    )
-
-    # For image-based templates with no text, generate a proper pitch deck structure
-    if not has_content and slide_count > 0:
-        from app.services import claude as claude_svc
-        system = claude_svc.build_system_prompt("professional", "executive", slide_count)
-        stub_raw, _ = claude_svc._stub_slides(system, slide_count)
-        ai_slides = claude_svc.validate_slides(stub_raw)
-        for i, ai_slide in enumerate(ai_slides[:slide_count]):
-            if i < len(slides_data):
-                slides_data[i]["title"] = ai_slide.get("title", "")
-                slides_data[i]["bullets"] = ai_slide.get("bullets", [])
-                slides_data[i]["speaker_notes"] = ai_slide.get("speaker_notes", "")
-                slides_data[i]["layout"] = ai_slide.get("layout", "bullets")
+    # Keep original PPTX content as-is — design and content both preserved via build_pptx_from_template on export
 
     # Normalise any missing fields
     for i, s in enumerate(slides_data):
@@ -242,8 +229,8 @@ async def copy_template(
     conv_id = uuid.uuid4()
     await db.execute(
         sa.text(
-            "INSERT INTO conversions (id, user_id, original_filename, status, theme, slide_count, completed_at) "
-            "VALUES (:id, :uid, :fname, 'done', :theme, :sc, :now)"
+            "INSERT INTO conversions (id, user_id, original_filename, status, theme, slide_count, completed_at, source_pptx_key) "
+            "VALUES (:id, :uid, :fname, 'done', :theme, :sc, :now, :src_key)"
         ),
         {
             "id": str(conv_id),
@@ -252,6 +239,7 @@ async def copy_template(
             "theme": t.theme or "clean_slate",
             "sc": slide_count,
             "now": datetime.now(timezone.utc),
+            "src_key": t.pptx_key,
         },
     )
 
@@ -281,13 +269,13 @@ async def copy_template(
     return TemplateCopyResponse(conversion_id=conv_id, slide_count=slide_count)
 
 
-# ── Admin: delete (deactivate) a template ─────────────────────────────────────
+# ── Delete a template (admin: any; user: only their own private templates) ─────
 
 @router.delete("/{template_id}", status_code=204)
 async def delete_template(
     template_id: str,
     db: AsyncSession = Depends(get_db),
-    admin: User = Depends(require_admin),
+    current_user: User = Depends(get_current_user),
 ):
     try:
         tid = uuid.UUID(template_id)
@@ -298,7 +286,12 @@ async def delete_template(
     if not t:
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Template not found"})
 
+    is_admin = current_user.role == "admin"
+    is_owner = t.created_by == current_user.id and not t.is_public
+    if not is_admin and not is_owner:
+        raise HTTPException(status_code=403, detail={"code": "FORBIDDEN", "message": "You can only delete your own templates"})
+
     await db.execute(sa.text("UPDATE templates SET is_active = false WHERE id = :id"), {"id": str(tid)})
-    await log_event(db, "template.deleted", actor_id=admin.id, target_type="template", target_id=tid,
+    await log_event(db, "template.deleted", actor_id=current_user.id, target_type="template", target_id=tid,
                     metadata={"name": t.name})
     await db.commit()
