@@ -258,8 +258,8 @@ async def copy_template(
     for slide_data in slides_data:
         await db.execute(
             sa.text(
-                "INSERT INTO slides (id, conversion_id, position, layout, title, bullets, speaker_notes, is_deleted) "
-                "VALUES (:id, :cid, :pos, :layout, :title, CAST(:bullets AS jsonb), :notes, false)"
+                "INSERT INTO slides (id, conversion_id, position, layout, title, bullets, speaker_notes, color_scheme, shape_style, is_deleted) "
+                "VALUES (:id, :cid, :pos, :layout, :title, CAST(:bullets AS jsonb), :notes, :color_scheme, :shape_style, false)"
             ),
             {
                 "id": str(uuid.uuid4()),
@@ -269,6 +269,8 @@ async def copy_template(
                 "title": slide_data.get("title", ""),
                 "bullets": json.dumps(slide_data.get("bullets", [])),
                 "notes": slide_data.get("speaker_notes", ""),
+                "color_scheme": slide_data.get("color_scheme", "default"),
+                "shape_style": slide_data.get("shape_style", "square"),
             },
         )
 
