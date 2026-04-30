@@ -36,6 +36,15 @@ PPTX_MIMES = {
 }
 
 
+async def _db_exec(sql: str, params: dict) -> None:
+    """Run a single SQL statement in its own short-lived DB session."""
+    from app.core.database import get_session_factory
+    factory = get_session_factory()
+    async with factory() as db:
+        await db.execute(sa.text(sql), params)
+        await db.commit()
+
+
 async def _generate_slides_task(
     conv_id: uuid.UUID,
     doc_text: str,
@@ -47,41 +56,47 @@ async def _generate_slides_task(
     original_filename: str,
     user_id: uuid.UUID,
 ) -> None:
-    """Background task: calls AI and saves slides, then marks conversion done/failed."""
-    from app.core.database import get_session_factory
+    """Background task: calls AI and saves slides, then marks conversion done/failed.
+
+    DB connections are held only during actual writes — never during the AI call —
+    so the connection pool is not exhausted while waiting for the AI API.
+    """
     from app.services.claude import friendly_error
 
-    factory = get_session_factory()
-    async with factory() as db:
-        try:
-            await db.execute(
-                sa.text("UPDATE conversions SET status='generating' WHERE id=:id"),
-                {"id": str(conv_id)},
+    try:
+        # 1. Mark as generating (brief DB write, connection released immediately)
+        await _db_exec(
+            "UPDATE conversions SET status='generating' WHERE id=:id",
+            {"id": str(conv_id)},
+        )
+
+        # 2. Call AI — NO DB connection held during this (may take 30-120s)
+        if pptx_slides is not None:
+            validated = pptx_slides
+            tokens_used = 0
+        else:
+            system_prompt = claude.build_system_prompt(
+                style=style,
+                audience_level=audience_level,
+                slide_count=slide_count,
             )
-            await db.commit()
+            raw_response, tokens_used = await claude.call_claude(system_prompt, doc_text)
+            validated = claude.validate_slides(raw_response)
 
-            if pptx_slides is not None:
-                validated = pptx_slides
-                tokens_used = 0
-            else:
-                system_prompt = claude.build_system_prompt(
-                    style=style,
-                    audience_level=audience_level,
-                    slide_count=slide_count,
-                )
-                raw_response, tokens_used = await claude.call_claude(system_prompt, doc_text)
-                validated = claude.validate_slides(raw_response)
+        validated.append({
+            "layout": "hero",
+            "title": "Thank You",
+            "bullets": ["Questions & Discussion"],
+            "speaker_notes": "Thank the audience for their time and attention. Open the floor for questions and discussion.",
+            "color_scheme": "default",
+            "shape_style": "square",
+        })
 
-            validated.append({
-                "layout": "hero",
-                "title": "Thank You",
-                "bullets": ["Questions & Discussion"],
-                "speaker_notes": "Thank the audience for their time and attention. Open the floor for questions and discussion.",
-                "color_scheme": "default",
-                "shape_style": "square",
-            })
-
-            for i, slide_data in enumerate(validated):
+        # 3. Save each slide individually (each gets its own short DB session)
+        from app.core.database import get_session_factory
+        factory = get_session_factory()
+        for i, slide_data in enumerate(validated):
+            async with factory() as db:
                 slide = Slide(
                     id=uuid.uuid4(),
                     conversion_id=conv_id,
@@ -95,45 +110,30 @@ async def _generate_slides_task(
                     is_deleted=False,
                 )
                 db.add(slide)
-                await db.flush()
                 await db.commit()
 
-            presentation_name = validated[0].get("title", "").strip() if validated else ""
-            await db.execute(
-                sa.text(
-                    "UPDATE conversions SET status='done', tokens_used=:tokens, "
-                    "completed_at=:completed, slide_count=:sc, name=:name WHERE id=:id"
-                ),
-                {
-                    "tokens": tokens_used,
-                    "completed": datetime.now(timezone.utc),
-                    "sc": len(validated),
-                    "name": presentation_name or None,
-                    "id": str(conv_id),
-                },
-            )
-            await log_event(
-                db, "conversion.created",
-                actor_id=user_id, target_type="conversion", target_id=conv_id,
-                metadata={"filename": original_filename, "slides": len(validated), "theme": theme},
-            )
-            await db.commit()
+        # 4. Mark as done (brief DB write)
+        presentation_name = validated[0].get("title", "").strip() if validated else ""
+        await _db_exec(
+            "UPDATE conversions SET status='done', tokens_used=:tokens, "
+            "completed_at=:completed, slide_count=:sc, name=:name WHERE id=:id",
+            {
+                "tokens": tokens_used,
+                "completed": datetime.now(timezone.utc),
+                "sc": len(validated),
+                "name": presentation_name or None,
+                "id": str(conv_id),
+            },
+        )
 
-        except Exception as exc:
-            try:
-                await db.rollback()
-                await db.execute(
-                    sa.text("UPDATE conversions SET status='failed', error_message=:msg WHERE id=:id"),
-                    {"msg": friendly_error(exc), "id": str(conv_id)},
-                )
-                await log_event(
-                    db, "conversion.failed",
-                    actor_id=user_id, target_type="conversion", target_id=conv_id,
-                    metadata={"filename": original_filename, "error": str(exc)[:200]},
-                )
-                await db.commit()
-            except Exception:
-                pass
+    except Exception as exc:
+        try:
+            await _db_exec(
+                "UPDATE conversions SET status='failed', error_message=:msg WHERE id=:id",
+                {"msg": friendly_error(exc), "id": str(conv_id)},
+            )
+        except Exception:
+            pass
 
 
 def _parse_uuid(value: str) -> uuid.UUID:
