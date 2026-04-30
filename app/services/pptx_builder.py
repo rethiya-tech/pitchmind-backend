@@ -136,6 +136,29 @@ def _lighter(hex_color: str, amount: int = 30) -> str:
     return f"#{r:02X}{g:02X}{b:02X}"
 
 
+def _add_ellipse(slide: Any, x: int, y: int, w: int, h: int,
+                 hex_color: str, shape_id: int) -> None:
+    color_val = _hex_val(hex_color)
+    sp_xml = (
+        f'<p:sp xmlns:p="{_P}" xmlns:a="{_A}">'
+        f'  <p:nvSpPr>'
+        f'    <p:cNvPr id="{shape_id}" name="ellipse{shape_id}"/>'
+        f'    <p:cNvSpPr><a:spLocks noGrp="1"/></p:cNvSpPr>'
+        f'    <p:nvPr/>'
+        f'  </p:nvSpPr>'
+        f'  <p:spPr>'
+        f'    <a:xfrm><a:off x="{x}" y="{y}"/><a:ext cx="{w}" cy="{h}"/></a:xfrm>'
+        f'    <a:prstGeom prst="ellipse"><a:avLst/></a:prstGeom>'
+        f'    <a:solidFill><a:srgbClr val="{color_val}"/></a:solidFill>'
+        f'    <a:ln><a:noFill/></a:ln>'
+        f'  </p:spPr>'
+        f'  <p:txBody><a:bodyPr/><a:lstStyle/><a:p/></p:txBody>'
+        f'</p:sp>'
+    )
+    spTree = slide._element.find(qn("p:cSld")).find(qn("p:spTree"))
+    spTree.append(etree.fromstring(sp_xml))
+
+
 def _add_bullet_column(sl: Any, bullets: list[str], x: int, y: int, w: int, h: int,
                        theme: Any, font: str = "Plus Jakarta Sans") -> None:
     """Add a column of bullet points as a textbox."""
@@ -175,35 +198,40 @@ def _render_common_footer(sl: Any, theme: Any, sid: int) -> None:
 
 
 def _render_hero(sl: Any, slide: Any, theme: Any, sid: int) -> None:
-    # No header band — full background
-    _add_textbox(sl, slide.title or "", TITLE_X, 1100000, TITLE_W, 1600000,
-                 size_pt=38, bold=True, hex_color="#FFFFFF")
-    _add_solid_rect(sl, TITLE_X, 2800000, DIVIDER_W * 2, DIVIDER_H * 2, theme.accent, sid)
+    _add_textbox(sl, slide.title or "", TITLE_X, 1300000, TITLE_W, 1600000,
+                 size_pt=38, bold=True, hex_color=theme.text)
+    _add_solid_rect(sl, TITLE_X, 3000000, DIVIDER_W * 2, DIVIDER_H * 2, theme.accent, sid)
     subtitle = slide.bullets[0] if slide.bullets else ""
     if subtitle:
-        _add_textbox(sl, subtitle, TITLE_X, 2950000, TITLE_W, 700000,
+        _add_textbox(sl, subtitle, TITLE_X, 3200000, TITLE_W, 700000,
                      size_pt=18, bold=False, hex_color=theme.text)
-    _render_common_footer(sl, theme, sid + 1)
+    if slide.speaker_notes:
+        sl.notes_slide.notes_text_frame.text = slide.speaker_notes
+
+
+# No-header layout constants (EMU)
+_NH_TITLE_Y   = 380000   # ~7% of H
+_NH_TITLE_H   = 1200000
+_NH_DIVIDER_Y = 1650000  # ~32%
+_NH_BULLETS_Y = 1750000  # ~34%
+_NH_BULLETS_H = 3200000  # to ~96%
 
 
 def _render_bullets(sl: Any, slide: Any, theme: Any, sid: int, slide_idx: int) -> None:
-    _render_common_header(sl, theme, slide_idx, sid)
-    _add_textbox(sl, slide.title or "", TITLE_X, TITLE_Y, TITLE_W, TITLE_H,
+    _add_textbox(sl, slide.title or "", TITLE_X, _NH_TITLE_Y, TITLE_W, _NH_TITLE_H,
                  size_pt=28, bold=True, hex_color=theme.text)
-    _add_solid_rect(sl, TITLE_X, DIVIDER_Y, DIVIDER_W, DIVIDER_H, theme.accent, sid + 2)
+    _add_solid_rect(sl, TITLE_X, _NH_DIVIDER_Y, DIVIDER_W, DIVIDER_H, theme.accent, sid)
     bullets = slide.bullets if slide.bullets else []
     if bullets:
-        _add_bullet_column(sl, bullets, TITLE_X, BULLETS_Y, TITLE_W, BULLETS_H, theme)
-    _render_common_footer(sl, theme, sid + 3)
+        _add_bullet_column(sl, bullets, TITLE_X, _NH_BULLETS_Y, TITLE_W, _NH_BULLETS_H, theme)
     if slide.speaker_notes:
         sl.notes_slide.notes_text_frame.text = slide.speaker_notes
 
 
 def _render_two_column(sl: Any, slide: Any, theme: Any, sid: int, slide_idx: int) -> None:
-    _render_common_header(sl, theme, slide_idx, sid)
-    _add_textbox(sl, slide.title or "", TITLE_X, TITLE_Y, TITLE_W, TITLE_H,
+    _add_textbox(sl, slide.title or "", TITLE_X, _NH_TITLE_Y, TITLE_W, _NH_TITLE_H,
                  size_pt=24, bold=True, hex_color=theme.text)
-    _add_solid_rect(sl, TITLE_X, DIVIDER_Y, DIVIDER_W, DIVIDER_H, theme.accent, sid + 2)
+    _add_solid_rect(sl, TITLE_X, _NH_DIVIDER_Y, DIVIDER_W, DIVIDER_H, theme.accent, sid)
 
     bullets = slide.bullets if slide.bullets else []
     mid = (len(bullets) + 1) // 2
@@ -214,17 +242,16 @@ def _render_two_column(sl: Any, slide: Any, theme: Any, sid: int, slide_idx: int
     col_w = (TITLE_W - gap) // 2
     right_x = TITLE_X + col_w + gap
 
-    # Column header strips
     col_hdr_h = 228600
-    col_content_y = BULLETS_Y + col_hdr_h + 60000
-    col_content_h = BULLETS_H - col_hdr_h - 60000
+    col_content_y = _NH_BULLETS_Y + col_hdr_h + 60000
+    col_content_h = _NH_BULLETS_H - col_hdr_h - 60000
 
-    _add_solid_rect(sl, TITLE_X, BULLETS_Y, col_w, col_hdr_h, theme.accent, sid + 3)
-    _add_textbox(sl, "Key Points", TITLE_X + 80000, BULLETS_Y, col_w - 160000, col_hdr_h,
+    _add_solid_rect(sl, TITLE_X, _NH_BULLETS_Y, col_w, col_hdr_h, theme.accent, sid + 1)
+    _add_textbox(sl, "Key Points", TITLE_X + 80000, _NH_BULLETS_Y, col_w - 160000, col_hdr_h,
                  size_pt=9, bold=True, hex_color="#FFFFFF")
 
-    _add_solid_rect(sl, right_x, BULLETS_Y, col_w, col_hdr_h, _lighter(theme.accent, 20), sid + 4)
-    _add_textbox(sl, "Details", right_x + 80000, BULLETS_Y, col_w - 160000, col_hdr_h,
+    _add_solid_rect(sl, right_x, _NH_BULLETS_Y, col_w, col_hdr_h, _lighter(theme.accent, 20), sid + 2)
+    _add_textbox(sl, "Details", right_x + 80000, _NH_BULLETS_Y, col_w - 160000, col_hdr_h,
                  size_pt=9, bold=True, hex_color="#FFFFFF")
 
     if left_bullets:
@@ -232,46 +259,183 @@ def _render_two_column(sl: Any, slide: Any, theme: Any, sid: int, slide_idx: int
     if right_bullets:
         _add_bullet_column(sl, right_bullets, right_x, col_content_y, col_w, col_content_h, theme)
 
-    _render_common_footer(sl, theme, sid + 5)
     if slide.speaker_notes:
         sl.notes_slide.notes_text_frame.text = slide.speaker_notes
 
 
 def _render_data_table(sl: Any, slide: Any, theme: Any, sid: int, slide_idx: int) -> None:
-    _render_common_header(sl, theme, slide_idx, sid)
-    _add_textbox(sl, slide.title or "", TITLE_X, TITLE_Y, TITLE_W, 900000,
+    _add_textbox(sl, slide.title or "", TITLE_X, _NH_TITLE_Y, TITLE_W, _NH_TITLE_H,
                  size_pt=24, bold=True, hex_color=theme.text)
 
     bullets = slide.bullets if slide.bullets else []
-    table_y = 1750000
-    row_h = 330000
-    gap = 18000
+    table_y = _NH_BULLETS_Y
+    row_h = 350000
+    gap = 22000
     label_w = int(TITLE_W * 0.38)
     value_w = TITLE_W - label_w
     padding = 70000
-
     value_bg = _lighter(theme.bg, 35)
 
-    base_sid = sid + 2
     for i, bullet in enumerate(bullets):
-        if ': ' in bullet:
-            label, value = bullet.split(': ', 1)
-        else:
-            label, value = bullet, ""
-
+        label, value = bullet.split(': ', 1) if ': ' in bullet else (bullet, "")
         y = table_y + i * (row_h + gap)
         label_bg = theme.accent if i % 2 == 0 else _lighter(theme.accent, 25)
+        base = sid + i * 4
 
-        _add_solid_rect(sl, TITLE_X, y, label_w, row_h, label_bg, base_sid + i * 4)
+        _add_solid_rect(sl, TITLE_X, y, label_w, row_h, label_bg, base)
         _add_textbox(sl, label, TITLE_X + padding, y + padding // 3, label_w - padding * 2, row_h - padding // 2,
                      size_pt=11, bold=True, hex_color="#FFFFFF")
-
-        _add_solid_rect(sl, TITLE_X + label_w, y, value_w, row_h, value_bg, base_sid + i * 4 + 1)
+        _add_solid_rect(sl, TITLE_X + label_w, y, value_w, row_h, value_bg, base + 1)
         _add_textbox(sl, value or "—", TITLE_X + label_w + padding, y + padding // 3,
                      value_w - padding * 2, row_h - padding // 2,
                      size_pt=11, bold=False, hex_color=theme.text)
 
-    _render_common_footer(sl, theme, base_sid + len(bullets) * 4)
+    if slide.speaker_notes:
+        sl.notes_slide.notes_text_frame.text = slide.speaker_notes
+
+
+def _render_timeline(sl: Any, slide: Any, theme: Any, sid: int, slide_idx: int) -> None:
+    _add_textbox(sl, slide.title or "", TITLE_X, _NH_TITLE_Y, TITLE_W, _NH_TITLE_H,
+                 size_pt=24, bold=True, hex_color=theme.text)
+
+    bullets = slide.bullets if slide.bullets else []
+    n = min(len(bullets), 6)
+    if n == 0:
+        if slide.speaker_notes:
+            sl.notes_slide.notes_text_frame.text = slide.speaker_notes
+        return
+
+    node_r = 130000
+    node_d = node_r * 2
+    line_cx = TITLE_X + node_r
+    content_x = TITLE_X + node_d + 150000
+    content_w = TITLE_W - node_d - 150000
+    row_h = _NH_BULLETS_H // n
+
+    # Vertical connecting line
+    _add_solid_rect(sl, line_cx - 18000, _NH_BULLETS_Y + node_r,
+                    36000, row_h * n - node_d, theme.accent, sid)
+
+    for i, bullet in enumerate(bullets[:n]):
+        parts = bullet.split(': ', 1)
+        label = parts[0] if len(parts) == 2 else f"Phase {i + 1}"
+        desc = parts[1] if len(parts) == 2 else bullet
+        y = _NH_BULLETS_Y + i * row_h
+        base = sid + 2 + i * 5
+        _add_ellipse(sl, line_cx - node_r, y, node_d, node_d, theme.accent, base)
+        label_h = 380000
+        _add_textbox(sl, label, content_x, y, content_w, label_h,
+                     size_pt=11, bold=True, hex_color=theme.accent)
+        if desc:
+            _add_textbox(sl, desc, content_x, y + label_h, content_w, row_h - label_h - 30000,
+                         size_pt=10, bold=False, hex_color=theme.text)
+
+    if slide.speaker_notes:
+        sl.notes_slide.notes_text_frame.text = slide.speaker_notes
+
+
+def _render_big_stat(sl: Any, slide: Any, theme: Any, sid: int, slide_idx: int) -> None:
+    _add_textbox(sl, slide.title or "", TITLE_X, _NH_TITLE_Y, TITLE_W, _NH_TITLE_H,
+                 size_pt=24, bold=True, hex_color=theme.text)
+
+    bullets = slide.bullets if slide.bullets else []
+    n = min(len(bullets), 3)
+    if n == 0:
+        if slide.speaker_notes:
+            sl.notes_slide.notes_text_frame.text = slide.speaker_notes
+        return
+
+    gap = 228600
+    card_w = (TITLE_W - gap * (n - 1)) // n
+    card_h = 2400000
+    card_y = _NH_BULLETS_Y + 200000
+    accent_bar_w = 80000
+    padding = 150000
+
+    for i, bullet in enumerate(bullets[:n]):
+        parts = bullet.split(': ', 1)
+        label = parts[0] if len(parts) == 2 else "Metric"
+        value = parts[1] if len(parts) == 2 else bullet
+        x = TITLE_X + i * (card_w + gap)
+        base = sid + 2 + i * 5
+        _add_solid_rect(sl, x, card_y, card_w, card_h, _lighter(theme.bg, 30), base)
+        _add_solid_rect(sl, x, card_y, accent_bar_w, card_h, theme.accent, base + 1)
+        _add_textbox(sl, value, x + accent_bar_w + padding, card_y + 200000,
+                     card_w - accent_bar_w - padding * 2, 1200000,
+                     size_pt=52, bold=True, hex_color=theme.accent)
+        _add_textbox(sl, label, x + accent_bar_w + padding, card_y + 1500000,
+                     card_w - accent_bar_w - padding * 2, 600000,
+                     size_pt=14, bold=False, hex_color=theme.text)
+
+    if slide.speaker_notes:
+        sl.notes_slide.notes_text_frame.text = slide.speaker_notes
+
+
+def _render_process(sl: Any, slide: Any, theme: Any, sid: int, slide_idx: int) -> None:
+    _add_textbox(sl, slide.title or "", TITLE_X, _NH_TITLE_Y, TITLE_W, _NH_TITLE_H,
+                 size_pt=24, bold=True, hex_color=theme.text)
+    _add_solid_rect(sl, TITLE_X, _NH_DIVIDER_Y, DIVIDER_W, DIVIDER_H, theme.accent, sid)
+
+    bullets = slide.bullets if slide.bullets else []
+    n = min(len(bullets), 5)
+    if n == 0:
+        if slide.speaker_notes:
+            sl.notes_slide.notes_text_frame.text = slide.speaker_notes
+        return
+
+    arrow_w = 150000
+    gap = 60000
+    step_span = arrow_w + gap * 2
+    box_w = (TITLE_W - step_span * (n - 1)) // n
+    box_h = 2000000
+    box_y = _NH_BULLETS_Y + 200000
+    num_h = 500000
+    dark_accent = _lighter(theme.accent, -20)
+
+    for i, bullet in enumerate(bullets[:n]):
+        x = TITLE_X + i * (box_w + step_span)
+        base = sid + 2 + i * 5
+        box_bg = theme.accent if i % 2 == 0 else _lighter(theme.accent, 30)
+        _add_solid_rect(sl, x, box_y, box_w, box_h, box_bg, base)
+        _add_solid_rect(sl, x, box_y, box_w, num_h, dark_accent, base + 1)
+        _add_textbox(sl, str(i + 1), x, box_y, box_w, num_h,
+                     size_pt=18, bold=True, hex_color="#FFFFFF")
+        _add_textbox(sl, bullet, x + 60000, box_y + num_h + 60000,
+                     box_w - 120000, box_h - num_h - 120000,
+                     size_pt=11, bold=False, hex_color="#FFFFFF")
+        if i < n - 1:
+            arrow_x = x + box_w + gap
+            arrow_y = box_y + box_h // 2 - 100000
+            _add_textbox(sl, "→", arrow_x, arrow_y, arrow_w, 300000,
+                         size_pt=16, bold=True, hex_color=theme.accent)
+
+    if slide.speaker_notes:
+        sl.notes_slide.notes_text_frame.text = slide.speaker_notes
+
+
+def _render_quote(sl: Any, slide: Any, theme: Any, sid: int, slide_idx: int) -> None:
+    _add_textbox(sl, slide.title or "", TITLE_X, _NH_TITLE_Y, TITLE_W, 800000,
+                 size_pt=18, bold=False, hex_color=theme.text)
+
+    bullets = slide.bullets if slide.bullets else []
+    quote_text = bullets[0] if bullets else ""
+    attribution = bullets[1] if len(bullets) > 1 else ""
+
+    # Large opening quotation mark
+    _add_textbox(sl, "“", TITLE_X, 1200000, 800000, 1200000,
+                 size_pt=80, bold=True, hex_color=theme.accent)
+
+    if quote_text:
+        _add_textbox(sl, quote_text, TITLE_X + 600000, 1400000,
+                     TITLE_W - 600000, 2200000,
+                     size_pt=22, bold=False, hex_color=theme.text)
+
+    _add_solid_rect(sl, TITLE_X, 3800000, DIVIDER_W * 2, DIVIDER_H * 2, theme.accent, sid)
+
+    if attribution:
+        _add_textbox(sl, f"— {attribution}", SLIDE_W - 4000000, 3900000, 3600000, 600000,
+                     size_pt=13, bold=False, hex_color=theme.text)
+
     if slide.speaker_notes:
         sl.notes_slide.notes_text_frame.text = slide.speaker_notes
 
@@ -384,6 +548,14 @@ def build_pptx(slides: list[Any], theme: Theme) -> bytes:
             _render_two_column(sl, slide, theme, sid, slide_idx)
         elif layout == 'data_table':
             _render_data_table(sl, slide, theme, sid, slide_idx)
+        elif layout == 'timeline':
+            _render_timeline(sl, slide, theme, sid, slide_idx)
+        elif layout == 'big_stat':
+            _render_big_stat(sl, slide, theme, sid, slide_idx)
+        elif layout == 'process':
+            _render_process(sl, slide, theme, sid, slide_idx)
+        elif layout == 'quote':
+            _render_quote(sl, slide, theme, sid, slide_idx)
         else:
             _render_bullets(sl, slide, theme, sid, slide_idx)
 

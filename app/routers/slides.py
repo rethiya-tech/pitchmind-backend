@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 
 import sqlalchemy as sa
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import get_current_user
@@ -55,6 +56,10 @@ async def patch_slide(
         updates["speaker_notes"] = body.speaker_notes
     if body.layout is not None:
         updates["layout"] = body.layout
+    if body.color_scheme is not None:
+        updates["color_scheme"] = body.color_scheme
+    if body.shape_style is not None:
+        updates["shape_style"] = body.shape_style
 
     if updates:
         updates["updated_at"] = datetime.now(timezone.utc)
@@ -98,6 +103,44 @@ async def delete_slide(
     await db.flush()
     await db.refresh(slide)
     return SlideOut.model_validate(slide)
+
+
+class SlideEnhanceBody(BaseModel):
+    instruction: str
+
+
+@router.post("/{slide_id}/ai-enhance")
+async def ai_enhance_slide(
+    slide_id: str,
+    body: SlideEnhanceBody,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    sid = _parse_slide_uuid(slide_id)
+    slide = await _get_slide_for_user(sid, current_user, db)
+
+    import logging
+    _log = logging.getLogger(__name__)
+    from app.services.claude import enhance_slide, friendly_error
+    try:
+        result = await enhance_slide(
+            body.instruction,
+            {
+                "title": slide.title,
+                "bullets": slide.bullets,
+                "speaker_notes": slide.speaker_notes,
+                "layout": slide.layout,
+                "color_scheme": slide.color_scheme,
+                "shape_style": slide.shape_style,
+            },
+        )
+    except Exception as exc:
+        _log.error("ai-enhance error: %s", exc, exc_info=True)
+        raise HTTPException(
+            status_code=502,
+            detail={"code": "AI_ERROR", "message": friendly_error(exc)},
+        )
+    return result
 
 
 @router.post("/{slide_id}/restore", response_model=SlideOut)

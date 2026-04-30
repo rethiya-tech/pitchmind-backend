@@ -9,6 +9,8 @@ class SlidePatch(BaseModel):
     bullets: list[str] | None = None
     speaker_notes: str | None = None
     layout: str | None = None
+    color_scheme: str | None = None
+    shape_style: str | None = None
 
 
 class SlideInsert(BaseModel):
@@ -17,6 +19,8 @@ class SlideInsert(BaseModel):
     bullets: list[str] = []
     speaker_notes: str = ""
     layout: str = "bullets"
+    color_scheme: str = "default"
+    shape_style: str = "square"
 
 
 class SlideReorder(BaseModel):
@@ -28,6 +32,8 @@ class SlideOut(BaseModel):
     conversion_id: uuid.UUID
     position: int
     layout: str
+    color_scheme: str
+    shape_style: str
     title: str | None
     bullets: list[str]
     speaker_notes: str | None
