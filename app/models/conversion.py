@@ -34,6 +34,7 @@ class Conversion(Base):
     retry_count: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default="0", default=0,
     )
+    source_pptx_key: Mapped[str | None] = mapped_column(String(500), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), server_default=text("NOW()"), nullable=False,

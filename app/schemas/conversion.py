@@ -85,6 +85,7 @@ class ConversionOut(BaseModel):
     audience_level: str | None
     original_filename: str | None
     tokens_used: int
+    source_pptx_key: str | None = None
     created_at: datetime
     completed_at: datetime | None
 

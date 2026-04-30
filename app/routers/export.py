@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 import sqlalchemy as sa
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -12,10 +13,16 @@ from app.dependencies.auth import get_current_user
 from app.dependencies.db import get_db
 from app.models.conversion import Conversion
 from app.models.slide import Slide
+from app.models.upload import Upload
 from app.models.user import User
 from app.services import gcs, pptx_builder, themes as theme_svc
+import logging
+
+_log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/conversions", tags=["export"])
+
+PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
 
 
 class ExportResponse(BaseModel):
@@ -42,13 +49,45 @@ async def _load_slides_for_export(conversion_id: str, current_user: User, db: As
     if not slides:
         raise HTTPException(status_code=422, detail={"code": "NO_SLIDES", "message": "No slides to export"})
 
+    # Fetch the original upload if this conversion came from a file
+    upload = None
+    if conv.upload_id:
+        upload = await db.get(Upload, conv.upload_id)
+
+    return cid, conv, slides, upload
+
+
+def _build_pptx_bytes(conv: Any, slides: list, upload: Any = None) -> bytes:
+    """Build PPTX bytes, preserving original design when possible.
+
+    Priority:
+      1. Template-based conversion (Use Template flow) — source_pptx_key
+      2. Direct PPTX upload — original uploaded file
+      3. Fallback to app theme builder
+    """
+    # 1. Template copy flow
+    if conv.source_pptx_key:
+        template_bytes = gcs.read_pptx_key_bytes(conv.source_pptx_key)
+        if template_bytes:
+            _log.info("Export %s: using original template PPTX", conv.id)
+            return pptx_builder.build_pptx_from_template(slides, template_bytes)
+        _log.warning("Export %s: template PPTX missing at %s, falling back", conv.id, conv.source_pptx_key)
+
+    # 2. Direct PPTX upload
+    if upload and upload.mime_type == PPTX_MIME:
+        upload_bytes = gcs.read_upload_bytes(upload.gcs_key, str(upload.id))
+        if upload_bytes:
+            _log.info("Export %s: using original uploaded PPTX", conv.id)
+            return pptx_builder.build_pptx_from_template(slides, upload_bytes)
+        _log.warning("Export %s: uploaded PPTX missing at %s, falling back", conv.id, upload.gcs_key)
+
+    # 3. App theme builder
     theme_id = conv.theme or "executive_gold"
     try:
         theme = theme_svc.get_theme(theme_id)
     except KeyError:
         theme = theme_svc.get_theme("executive_gold")
-
-    return cid, conv, slides, theme
+    return pptx_builder.build_pptx(slides, theme)
 
 
 @router.get("/{conversion_id}/download", include_in_schema=False)
@@ -58,12 +97,12 @@ async def download_pptx_local(
     current_user: User = Depends(get_current_user),
 ):
     """Dev-only: build and stream PPTX directly without GCS."""
-    cid, conv, slides, theme = await _load_slides_for_export(conversion_id, current_user, db)
-    pptx_bytes = pptx_builder.build_pptx(slides, theme)
+    cid, conv, slides, upload = await _load_slides_for_export(conversion_id, current_user, db)
+    pptx_bytes = _build_pptx_bytes(conv, slides, upload)
     filename = (conv.original_filename or "presentation").rsplit(".", 1)[0] + ".pptx"
     return Response(
         content=pptx_bytes,
-        media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        media_type=PPTX_MIME,
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
@@ -76,11 +115,10 @@ async def export_pptx(
     current_user: User = Depends(get_current_user),
 ):
     settings = get_settings()
-    cid, conv, slides, theme = await _load_slides_for_export(conversion_id, current_user, db)
-    pptx_bytes = pptx_builder.build_pptx(slides, theme)
+    cid, conv, slides, upload = await _load_slides_for_export(conversion_id, current_user, db)
+    pptx_bytes = _build_pptx_bytes(conv, slides, upload)
 
     if not gcs.is_configured():
-        # Local dev: return direct download URL served by this backend
         base = str(request.base_url).rstrip("/")
         download_url = f"{base}/api/v1/conversions/{cid}/download"
         expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
@@ -91,7 +129,7 @@ async def export_pptx(
         bucket=settings.GCS_BUCKET,
         key=pptx_key,
         data=pptx_bytes,
-        content_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        content_type=PPTX_MIME,
     )
     download_url = gcs.get_signed_download_url(
         bucket=settings.GCS_BUCKET,

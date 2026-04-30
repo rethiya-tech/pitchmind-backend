@@ -1,5 +1,6 @@
 import io
 import logging
+from copy import deepcopy
 from typing import Any
 
 _log = logging.getLogger(__name__)
@@ -558,6 +559,111 @@ def build_pptx(slides: list[Any], theme: Theme) -> bytes:
             _render_quote(sl, slide, theme, sid, slide_idx)
         else:
             _render_bullets(sl, slide, theme, sid, slide_idx)
+
+    buf = io.BytesIO()
+    prs.save(buf)
+    return buf.getvalue()
+
+
+# ── Template-preserving builder ───────────────────────────────────────────────
+
+_R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+
+
+def _delete_slide(prs: Any, idx: int) -> None:
+    sld_id_lst = prs.slides._sldIdLst
+    rId = sld_id_lst[idx].get(f"{{{_R_NS}}}id")
+    if rId:
+        prs.part.drop_rel(rId)
+    del sld_id_lst[idx]
+
+
+def _clone_slide(prs: Any, source_idx: int) -> None:
+    """Append a deep copy of the slide at source_idx to the end of the deck."""
+    src_slide = prs.slides[source_idx]
+    new_slide = prs.slides.add_slide(src_slide.slide_layout)
+    src_cSld = src_slide._element.find(qn("p:cSld"))
+    tgt_cSld = new_slide._element.find(qn("p:cSld"))
+    if src_cSld is not None and tgt_cSld is not None:
+        parent = tgt_cSld.getparent()
+        idx_in_parent = list(parent).index(tgt_cSld)
+        parent.remove(tgt_cSld)
+        parent.insert(idx_in_parent, deepcopy(src_cSld))
+
+
+def _update_slide_placeholders(slide: Any, title: str, bullets: list[str], notes: str) -> None:
+    """Update title and body placeholders in a slide; leave all visuals intact."""
+    for shape in slide.shapes:
+        if not shape.has_text_frame or not shape.is_placeholder:
+            continue
+        ph_idx = shape.placeholder_format.idx
+        tf = shape.text_frame
+
+        if ph_idx == 0:
+            # Title placeholder — replace text preserving first paragraph formatting
+            p0 = tf.paragraphs[0]
+            # Keep the first run's font formatting, just swap the text
+            if p0.runs:
+                p0.runs[0].text = title
+                for run in p0.runs[1:]:
+                    run.text = ""
+            else:
+                p0.text = title
+            # Remove extra paragraphs
+            for extra_p in list(tf.paragraphs[1:]):
+                p_elem = extra_p._p
+                p_elem.getparent().remove(p_elem)
+
+        elif ph_idx in (1, 2, 13, 14, 15):
+            # Body / content placeholder — replace with bullet lines
+            # Capture formatting from first run of first paragraph
+            first_runs = tf.paragraphs[0].runs if tf.paragraphs else []
+            sample_run_xml = deepcopy(first_runs[0]._r) if first_runs else None
+
+            # Clear all existing paragraph elements
+            txBody = tf._txBody
+            for p_elem in list(txBody.findall(qn("a:p"))):
+                txBody.remove(p_elem)
+
+            for bullet_text in (bullets if bullets else [""]):
+                p_elem = etree.SubElement(txBody, qn("a:p"))
+                r_elem = deepcopy(sample_run_xml) if sample_run_xml is not None else etree.SubElement(p_elem, qn("a:r"))
+                # Update the run text
+                t_elem = r_elem.find(qn("a:t"))
+                if t_elem is None:
+                    t_elem = etree.SubElement(r_elem, qn("a:t"))
+                t_elem.text = bullet_text
+                p_elem.append(r_elem)
+
+    if notes:
+        try:
+            slide.notes_slide.notes_text_frame.text = notes
+        except Exception:
+            pass
+
+
+def build_pptx_from_template(user_slides: list[Any], template_bytes: bytes) -> bytes:
+    """Export using the original PPTX as the visual base, updating only text."""
+    prs = Presentation(io.BytesIO(template_bytes))
+
+    template_count = len(prs.slides._sldIdLst)
+    user_count = len(user_slides)
+
+    # Extend: clone last template slide to fill missing positions
+    while len(prs.slides._sldIdLst) < user_count:
+        _clone_slide(prs, template_count - 1)
+
+    # Shrink: remove slides from the end
+    while len(prs.slides._sldIdLst) > user_count:
+        _delete_slide(prs, len(prs.slides._sldIdLst) - 1)
+
+    # Update text in each slide
+    for i, user_slide in enumerate(user_slides):
+        slide = prs.slides[i]
+        title = getattr(user_slide, "title", "") or ""
+        bullets = list(getattr(user_slide, "bullets", []) or [])
+        notes = getattr(user_slide, "speaker_notes", "") or ""
+        _update_slide_placeholders(slide, title, bullets, notes)
 
     buf = io.BytesIO()
     prs.save(buf)
