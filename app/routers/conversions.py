@@ -255,7 +255,11 @@ async def create_conversion(
                         "speaker_notes": "",
                     })
 
-    # Schedule background task — get_db() will auto-commit before it runs
+    # Commit the conversion INSERT now so the background task can find the row.
+    # get_db() would only commit after the handler returns, which is too late
+    # since create_task() may start executing immediately on the next await.
+    await db.commit()
+
     asyncio.create_task(_generate_slides_task(
         conv_id=conv.id,
         doc_text=doc_text,
