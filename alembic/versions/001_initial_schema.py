@@ -15,7 +15,7 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.execute('CREATE EXTENSION IF NOT EXISTS "pgcrypto"')
+    # gen_random_uuid() is built-in since PG 14; no extension needed
 
     op.create_table('users',
         sa.Column('id', postgresql.UUID(as_uuid=True),
