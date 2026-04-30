@@ -92,6 +92,14 @@ async def delete_slide(
         sa.text("UPDATE slides SET is_deleted = true, deleted_at = :now, updated_at = :now WHERE id = :id"),
         {"now": now, "id": str(sid)},
     )
+    await db.execute(
+        sa.text(
+            "UPDATE conversions SET slide_count = ("
+            "  SELECT COUNT(*) FROM slides WHERE conversion_id = :cid AND is_deleted = false"
+            ") WHERE id = :cid"
+        ),
+        {"cid": str(slide.conversion_id)},
+    )
     await db.flush()
     await db.refresh(slide)
     return SlideOut.model_validate(slide)
@@ -147,6 +155,14 @@ async def restore_slide(
     await db.execute(
         sa.text("UPDATE slides SET is_deleted = false, deleted_at = NULL, updated_at = :now WHERE id = :id"),
         {"now": now, "id": str(sid)},
+    )
+    await db.execute(
+        sa.text(
+            "UPDATE conversions SET slide_count = ("
+            "  SELECT COUNT(*) FROM slides WHERE conversion_id = :cid AND is_deleted = false"
+            ") WHERE id = :cid"
+        ),
+        {"cid": str(slide.conversion_id)},
     )
     await db.flush()
     await db.refresh(slide)

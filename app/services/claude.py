@@ -291,33 +291,90 @@ def _is_placeholder_anthropic_key(key: str) -> bool:
 def _stub_slides(system: str, slide_count: int) -> tuple[dict, int]:
     m = re.search(r"approximately (\d+)", system)
     n = int(m.group(1)) if m else slide_count
-    slides = [
+    # Pitch deck structure with editable placeholder text
+    deck = [
         {
             "layout": "hero",
-            "title": "Presentation Title",
-            "bullets": ["Subtitle or tagline goes here", "Generated in development mode", "Add a real API key for AI generation"],
-            "speaker_notes": "This is the opening slide. Welcome the audience and introduce the main topic. Provide context for why this presentation matters and what the audience will learn.",
+            "title": "Your Presentation Title",
+            "bullets": ["Add your tagline or subtitle here"],
+            "speaker_notes": "Opening slide. Replace the title and tagline with your own content.",
             "color_scheme": "default",
             "shape_style": "square",
-        }
-    ]
-    section_titles = [
-        "Executive Summary", "Key Findings", "Market Overview",
-        "Strategic Recommendations", "Implementation Plan",
-        "Financial Projections", "Risk Assessment", "Next Steps",
-        "Conclusion", "Questions & Discussion",
-    ]
-    for i in range(1, n):
-        title = section_titles[(i - 1) % len(section_titles)]
-        slides.append({
-            "layout": "bullets" if i % 3 != 0 else "two_column",
-            "title": title,
-            "bullets": [f"Key insight {j + 1} related to {title.lower()}" for j in range(4)],
-            "speaker_notes": f"Discuss the details of {title.lower()}. Provide supporting data and context. Engage the audience with relevant examples.",
+        },
+        {
+            "layout": "bullets",
+            "title": "The Problem",
+            "bullets": ["Describe the problem you are solving", "Who is affected and how", "Current solutions fall short because…"],
+            "speaker_notes": "Explain the pain point clearly. Make the audience feel the urgency.",
             "color_scheme": "default",
             "shape_style": "square",
-        })
-    return {"slides": slides[:n]}, 0
+        },
+        {
+            "layout": "bullets",
+            "title": "Our Solution",
+            "bullets": ["State your solution in one sentence", "Key differentiator vs alternatives", "Why now is the right time"],
+            "speaker_notes": "Present your solution simply and confidently.",
+            "color_scheme": "default",
+            "shape_style": "square",
+        },
+        {
+            "layout": "data_table",
+            "title": "Market Opportunity",
+            "bullets": ["Total Addressable Market: $X billion", "Serviceable Market: $X million", "Target Segment: Describe here", "Growth Rate: X% annually"],
+            "speaker_notes": "Back up your market size with credible data sources.",
+            "color_scheme": "default",
+            "shape_style": "square",
+        },
+        {
+            "layout": "bullets",
+            "title": "Business Model",
+            "bullets": ["Revenue stream: how you make money", "Pricing model: subscription / per-use / etc.", "Unit economics: LTV vs CAC"],
+            "speaker_notes": "Be specific about how revenue flows in.",
+            "color_scheme": "default",
+            "shape_style": "square",
+        },
+        {
+            "layout": "two_column",
+            "title": "Traction & Milestones",
+            "bullets": ["## Progress", "Users / customers to date", "Revenue or ARR", "## Goals", "Key partnerships signed", "Next milestone target"],
+            "speaker_notes": "Show momentum. Numbers build credibility.",
+            "color_scheme": "default",
+            "shape_style": "square",
+        },
+        {
+            "layout": "bullets",
+            "title": "The Team",
+            "bullets": ["Founder name — role and background", "Co-founder name — role and background", "Key advisor — relevant expertise"],
+            "speaker_notes": "Investors back people. Highlight why this team wins.",
+            "color_scheme": "default",
+            "shape_style": "square",
+        },
+        {
+            "layout": "data_table",
+            "title": "Financial Projections",
+            "bullets": ["Year 1 Revenue: $X", "Year 2 Revenue: $X", "Year 3 Revenue: $X", "Break-even: Month X"],
+            "speaker_notes": "Show a credible growth path. Explain key assumptions.",
+            "color_scheme": "default",
+            "shape_style": "square",
+        },
+        {
+            "layout": "bullets",
+            "title": "The Ask",
+            "bullets": ["Raising: $X at $Y valuation", "Use of funds: product / sales / hiring", "Timeline: close by [date]"],
+            "speaker_notes": "Be clear and confident about what you need and why.",
+            "color_scheme": "default",
+            "shape_style": "square",
+        },
+        {
+            "layout": "hero",
+            "title": "Thank You",
+            "bullets": ["your@email.com  ·  yourwebsite.com"],
+            "speaker_notes": "Leave contact details. Invite questions.",
+            "color_scheme": "default",
+            "shape_style": "square",
+        },
+    ]
+    return {"slides": deck[:n]}, 0
 
 
 async def _call_gemini(system: str, user_message: str) -> tuple[dict, int]:

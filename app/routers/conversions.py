@@ -25,7 +25,7 @@ from app.schemas.conversion import (
     ConversionOut,
     SlideOut,
 )
-from app.services import claude, themes as theme_svc
+from app.services import claude
 from app.services.audit import log_event
 
 router = APIRouter(prefix="/conversions", tags=["conversions"])
@@ -53,6 +53,8 @@ async def create_conversion(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    upload = None
+
     # ── Prompt-only mode (no file upload) ────────────────────────────────────
     if body.prompt_text and not body.upload_id:
         display_name = (body.prompt_text[:57] + "…") if len(body.prompt_text) > 57 else body.prompt_text
@@ -127,15 +129,41 @@ async def create_conversion(
         else:
             doc_text = f"Document: {upload.original_filename}\n\nPlease generate a {body.slide_count}-slide presentation."
 
+    # For PPTX uploads with extractable text, use the original slide structure directly
+    pptx_slides: list[dict] | None = None
+    if upload and upload.mime_type in PPTX_MIMES and upload.parsed_doc:
+        from app.services.parser import ParsedDocument
+        _doc = ParsedDocument.from_dict(upload.parsed_doc)
+        _has_real = any(
+            s.heading and not s.heading.startswith("Slide ") and s.heading != "Presentation"
+            for s in _doc.sections
+        )
+        if _has_real:
+            pptx_slides = []
+            for s in _doc.sections:
+                bullets = (s.bullets or s.paragraphs)[:6]
+                while len(bullets) < 3:
+                    bullets.append("")
+                pptx_slides.append({
+                    "layout": "bullets",
+                    "title": s.heading,
+                    "bullets": bullets,
+                    "speaker_notes": "",
+                })
+
     # Call Claude and save slides
     try:
-        system_prompt = claude.build_system_prompt(
-            style=body.style,
-            audience_level=body.audience_level,
-            slide_count=body.slide_count,
-        )
-        raw_response, tokens_used = await claude.call_claude(system_prompt, doc_text)
-        validated = claude.validate_slides(raw_response)
+        if pptx_slides is not None:
+            validated = pptx_slides
+            tokens_used = 0
+        else:
+            system_prompt = claude.build_system_prompt(
+                style=body.style,
+                audience_level=body.audience_level,
+                slide_count=body.slide_count,
+            )
+            raw_response, tokens_used = await claude.call_claude(system_prompt, doc_text)
+            validated = claude.validate_slides(raw_response)
 
         # Save slides
         for i, slide_data in enumerate(validated):
@@ -196,30 +224,18 @@ async def list_conversions(
     current_user: User = Depends(get_current_user),
 ):
     offset = (page - 1) * page_size
-    is_admin = current_user.role == "admin"
-
-    if is_admin:
-        total_result = await db.execute(sa.text("SELECT COUNT(*) FROM conversions"))
-        total = total_result.scalar() or 0
-        result = await db.execute(
-            sa.select(Conversion)
-            .order_by(Conversion.created_at.desc())
-            .offset(offset)
-            .limit(page_size)
-        )
-    else:
-        total_result = await db.execute(
-            sa.text("SELECT COUNT(*) FROM conversions WHERE user_id = :uid"),
-            {"uid": str(current_user.id)},
-        )
-        total = total_result.scalar() or 0
-        result = await db.execute(
-            sa.select(Conversion)
-            .where(Conversion.user_id == current_user.id)
-            .order_by(Conversion.created_at.desc())
-            .offset(offset)
-            .limit(page_size)
-        )
+    total_result = await db.execute(
+        sa.text("SELECT COUNT(*) FROM conversions WHERE user_id = :uid"),
+        {"uid": str(current_user.id)},
+    )
+    total = total_result.scalar() or 0
+    result = await db.execute(
+        sa.select(Conversion)
+        .where(Conversion.user_id == current_user.id)
+        .order_by(Conversion.created_at.desc())
+        .offset(offset)
+        .limit(page_size)
+    )
 
     convs = result.scalars().all()
     return ConversionListResponse(
@@ -394,13 +410,14 @@ async def stream_conversion(
     if not user or not user.is_active:
         raise HTTPException(status_code=401, detail={"code": "INVALID_TOKEN", "message": "Invalid token"})
 
-    conv = await db.get(Conversion, conversion_id)
+    cid = _parse_uuid(conversion_id)
+    conv = await db.get(Conversion, cid)
     if not conv or conv.user_id != user.id:
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Conversion not found"})
 
     async def event_generator():
         # Check if conversion failed — surface the error immediately
-        fresh_conv = await db.get(Conversion, conv.id)
+        fresh_conv = await db.get(Conversion, cid)
         if fresh_conv and fresh_conv.status == "failed":
             msg = fresh_conv.error_message or "Generation failed"
             yield f"event: error\ndata: {json.dumps({'message': msg})}\n\n"
@@ -408,7 +425,7 @@ async def stream_conversion(
 
         result = await db.execute(
             sa.select(Slide)
-            .where(Slide.conversion_id == conversion_id, Slide.is_deleted == False)
+            .where(Slide.conversion_id == cid, Slide.is_deleted == False)
             .order_by(Slide.position)
         )
         slides = result.scalars().all()
@@ -437,9 +454,9 @@ async def stream_conversion(
 
         await db.execute(
             sa.text("UPDATE conversions SET status='done', completed_at=NOW() WHERE id=:id AND status = 'pending'"),
-            {"id": str(conversion_id)},
+            {"id": str(cid)},
         )
-        yield f"event: done\ndata: {json.dumps({'conversion_id': str(conversion_id), 'total_slides': total})}\n\n"
+        yield f"event: done\ndata: {json.dumps({'conversion_id': str(cid), 'total_slides': total})}\n\n"
 
     return StreamingResponse(
         event_generator(),
