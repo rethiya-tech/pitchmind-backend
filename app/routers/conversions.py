@@ -30,6 +30,111 @@ from app.services.audit import log_event
 
 router = APIRouter(prefix="/conversions", tags=["conversions"])
 
+PPTX_MIMES = {
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "application/vnd.ms-powerpoint",
+}
+
+
+async def _generate_slides_task(
+    conv_id: uuid.UUID,
+    doc_text: str,
+    pptx_slides: list[dict] | None,
+    style: str,
+    audience_level: str,
+    slide_count: int,
+    theme: str,
+    original_filename: str,
+    user_id: uuid.UUID,
+) -> None:
+    """Background task: calls AI and saves slides, then marks conversion done/failed."""
+    from app.core.database import get_session_factory
+    from app.services.claude import friendly_error
+
+    factory = get_session_factory()
+    async with factory() as db:
+        try:
+            await db.execute(
+                sa.text("UPDATE conversions SET status='generating' WHERE id=:id"),
+                {"id": str(conv_id)},
+            )
+            await db.commit()
+
+            if pptx_slides is not None:
+                validated = pptx_slides
+                tokens_used = 0
+            else:
+                system_prompt = claude.build_system_prompt(
+                    style=style,
+                    audience_level=audience_level,
+                    slide_count=slide_count,
+                )
+                raw_response, tokens_used = await claude.call_claude(system_prompt, doc_text)
+                validated = claude.validate_slides(raw_response)
+
+            validated.append({
+                "layout": "hero",
+                "title": "Thank You",
+                "bullets": ["Questions & Discussion"],
+                "speaker_notes": "Thank the audience for their time and attention. Open the floor for questions and discussion.",
+                "color_scheme": "default",
+                "shape_style": "square",
+            })
+
+            for i, slide_data in enumerate(validated):
+                slide = Slide(
+                    id=uuid.uuid4(),
+                    conversion_id=conv_id,
+                    position=i,
+                    layout=slide_data.get("layout", "bullets"),
+                    title=slide_data.get("title", ""),
+                    bullets=slide_data.get("bullets", []),
+                    speaker_notes=slide_data.get("speaker_notes", ""),
+                    color_scheme=slide_data.get("color_scheme", "default"),
+                    shape_style=slide_data.get("shape_style", "square"),
+                    is_deleted=False,
+                )
+                db.add(slide)
+                await db.flush()
+                await db.commit()
+
+            presentation_name = validated[0].get("title", "").strip() if validated else ""
+            await db.execute(
+                sa.text(
+                    "UPDATE conversions SET status='done', tokens_used=:tokens, "
+                    "completed_at=:completed, slide_count=:sc, name=:name WHERE id=:id"
+                ),
+                {
+                    "tokens": tokens_used,
+                    "completed": datetime.now(timezone.utc),
+                    "sc": len(validated),
+                    "name": presentation_name or None,
+                    "id": str(conv_id),
+                },
+            )
+            await log_event(
+                db, "conversion.created",
+                actor_id=user_id, target_type="conversion", target_id=conv_id,
+                metadata={"filename": original_filename, "slides": len(validated), "theme": theme},
+            )
+            await db.commit()
+
+        except Exception as exc:
+            try:
+                await db.rollback()
+                await db.execute(
+                    sa.text("UPDATE conversions SET status='failed', error_message=:msg WHERE id=:id"),
+                    {"msg": friendly_error(exc), "id": str(conv_id)},
+                )
+                await log_event(
+                    db, "conversion.failed",
+                    actor_id=user_id, target_type="conversion", target_id=conv_id,
+                    metadata={"filename": original_filename, "error": str(exc)[:200]},
+                )
+                await db.commit()
+            except Exception:
+                pass
+
 
 def _parse_uuid(value: str) -> uuid.UUID:
     try:
@@ -54,8 +159,10 @@ async def create_conversion(
     current_user: User = Depends(get_current_user),
 ):
     upload = None
+    doc_text: str = ""
+    pptx_slides: list[dict] | None = None
 
-    # ── Prompt-only mode (no file upload) ────────────────────────────────────
+    # ── Prompt-only mode ──────────────────────────────────────────────────────
     if body.prompt_text and not body.upload_id:
         display_name = (body.prompt_text[:57] + "…") if len(body.prompt_text) > 57 else body.prompt_text
         conv = Conversion(
@@ -95,6 +202,7 @@ async def create_conversion(
         db.add(conv)
         await db.flush()
 
+        # Parse document if not already done (fast, happens before returning)
         if not upload.parsed_doc and not upload.parsed_preview:
             from app.services.parser import parse_bytes
             from app.services import gcs as _gcs
@@ -129,96 +237,41 @@ async def create_conversion(
         else:
             doc_text = f"Document: {upload.original_filename}\n\nPlease generate a {body.slide_count}-slide presentation."
 
-    # For PPTX uploads with extractable text, use the original slide structure directly
-    pptx_slides: list[dict] | None = None
-    if upload and upload.mime_type in PPTX_MIMES and upload.parsed_doc:
-        from app.services.parser import ParsedDocument
-        _doc = ParsedDocument.from_dict(upload.parsed_doc)
-        _has_real = any(
-            s.heading and not s.heading.startswith("Slide ") and s.heading != "Presentation"
-            for s in _doc.sections
-        )
-        if _has_real:
-            pptx_slides = []
-            for s in _doc.sections:
-                bullets = (s.bullets or s.paragraphs)[:6]
-                while len(bullets) < 3:
-                    bullets.append("")
-                pptx_slides.append({
-                    "layout": "bullets",
-                    "title": s.heading,
-                    "bullets": bullets,
-                    "speaker_notes": "",
-                })
-
-    # Call Claude and save slides
-    try:
-        if pptx_slides is not None:
-            validated = pptx_slides
-            tokens_used = 0
-        else:
-            system_prompt = claude.build_system_prompt(
-                style=body.style,
-                audience_level=body.audience_level,
-                slide_count=body.slide_count,
+        # For PPTX uploads with clear slide structure, extract directly
+        if upload.mime_type in PPTX_MIMES and upload.parsed_doc:
+            from app.services.parser import ParsedDocument
+            _doc = ParsedDocument.from_dict(upload.parsed_doc)
+            _has_real = any(
+                s.heading and not s.heading.startswith("Slide ") and s.heading != "Presentation"
+                for s in _doc.sections
             )
-            raw_response, tokens_used = await claude.call_claude(system_prompt, doc_text)
-            validated = claude.validate_slides(raw_response)
+            if _has_real:
+                pptx_slides = []
+                for s in _doc.sections:
+                    bullets = (s.bullets or s.paragraphs)[:6]
+                    while len(bullets) < 3:
+                        bullets.append("")
+                    pptx_slides.append({
+                        "layout": "bullets",
+                        "title": s.heading,
+                        "bullets": bullets,
+                        "speaker_notes": "",
+                    })
 
-        # Always append a Thank You closing slide
-        validated.append({
-            "layout": "hero",
-            "title": "Thank You",
-            "bullets": ["Questions & Discussion"],
-            "speaker_notes": "Thank the audience for their time and attention. Open the floor for questions and discussion. Share your contact details if needed.",
-            "color_scheme": "default",
-            "shape_style": "square",
-        })
+    # Commit the conversion record immediately, then start AI generation in background
+    await db.commit()
 
-        # Save slides
-        for i, slide_data in enumerate(validated):
-            slide = Slide(
-                id=uuid.uuid4(),
-                conversion_id=conv.id,
-                position=i,
-                layout=slide_data.get("layout", "bullets"),
-                title=slide_data.get("title", ""),
-                bullets=slide_data.get("bullets", []),
-                speaker_notes=slide_data.get("speaker_notes", ""),
-                color_scheme=slide_data.get("color_scheme", "default"),
-                shape_style=slide_data.get("shape_style", "square"),
-                is_deleted=False,
-            )
-            db.add(slide)
-
-        presentation_name = validated[0].get("title", "").strip() if validated else ""
-        await db.execute(
-            sa.text(
-                "UPDATE conversions SET status='done', tokens_used=:tokens, "
-                "completed_at=:completed, slide_count=:sc, name=:name WHERE id=:id"
-            ),
-            {
-                "tokens": tokens_used,
-                "completed": datetime.now(timezone.utc),
-                "sc": len(validated),
-                "name": presentation_name or None,
-                "id": str(conv.id),
-            },
-        )
-        await log_event(db, "conversion.created", actor_id=current_user.id, target_type="conversion", target_id=conv.id,
-                        metadata={"filename": conv.original_filename, "slides": len(validated), "theme": body.theme})
-        await db.flush()
-
-    except Exception as exc:
-        from app.services.claude import friendly_error
-        user_msg = friendly_error(exc)
-        await db.execute(
-            sa.text("UPDATE conversions SET status='failed', error_message=:msg WHERE id=:id"),
-            {"msg": user_msg, "id": str(conv.id)},
-        )
-        await log_event(db, "conversion.failed", actor_id=current_user.id, target_type="conversion", target_id=conv.id,
-                        metadata={"filename": conv.original_filename, "error": str(exc)[:200]})
-        await db.flush()
+    asyncio.create_task(_generate_slides_task(
+        conv_id=conv.id,
+        doc_text=doc_text,
+        pptx_slides=pptx_slides,
+        style=body.style,
+        audience_level=body.audience_level,
+        slide_count=body.slide_count,
+        theme=body.theme,
+        original_filename=conv.original_filename or "",
+        user_id=current_user.id,
+    ))
 
     return ConversionCreateResponse(
         id=conv.id,
@@ -437,47 +490,76 @@ async def stream_conversion(
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Conversion not found"})
 
     async def event_generator():
-        # Check if conversion failed — surface the error immediately
-        fresh_conv = await db.get(Conversion, cid)
-        if fresh_conv and fresh_conv.status == "failed":
-            msg = fresh_conv.error_message or "Generation failed"
-            yield f"event: error\ndata: {json.dumps({'message': msg})}\n\n"
-            return
+        seen_positions: set[int] = set()
+        slides_emitted = 0
+        expected_total = 0
+        max_wait_secs = 300
+        start = asyncio.get_event_loop().time()
 
-        result = await db.execute(
-            sa.select(Slide)
-            .where(Slide.conversion_id == cid, Slide.is_deleted == False)
-            .order_by(Slide.position)
-        )
-        slides = result.scalars().all()
-        total = len(slides)
+        while True:
+            elapsed = asyncio.get_event_loop().time() - start
+            if elapsed > max_wait_secs:
+                yield f"event: error\ndata: {json.dumps({'message': 'Generation timed out'})}\n\n"
+                return
 
-        if total == 0:
-            err_msg = (fresh_conv.error_message if fresh_conv else None) or "No slides were generated"
-            yield f"event: error\ndata: {json.dumps({'message': err_msg})}\n\n"
-            return
+            # Always query fresh from DB to avoid SQLAlchemy identity-map cache
+            status_result = await db.execute(
+                sa.text("SELECT status, error_message, slide_count FROM conversions WHERE id=:id"),
+                {"id": str(cid)},
+            )
+            status_row = status_result.fetchone()
+            if not status_row:
+                yield f"event: error\ndata: {json.dumps({'message': 'Conversion not found'})}\n\n"
+                return
 
-        for i, slide in enumerate(slides):
-            yield f"event: slide_start\ndata: {json.dumps({'index': i, 'total': total})}\n\n"
-            slide_data = {
-                "id": str(slide.id),
-                "position": slide.position,
-                "layout": slide.layout,
-                "title": slide.title,
-                "bullets": slide.bullets,
-                "speaker_notes": slide.speaker_notes,
-                "color_scheme": slide.color_scheme,
-                "shape_style": slide.shape_style,
-            }
-            yield f"event: slide_done\ndata: {json.dumps({'slide': slide_data})}\n\n"
-            yield f"event: progress\ndata: {json.dumps({'completed': i + 1, 'total': total})}\n\n"
-            await asyncio.sleep(0)
+            current_status = status_row[0]
+            error_message = status_row[1]
+            expected_total = status_row[2] or expected_total
 
-        await db.execute(
-            sa.text("UPDATE conversions SET status='done', completed_at=NOW() WHERE id=:id AND status = 'pending'"),
-            {"id": str(cid)},
-        )
-        yield f"event: done\ndata: {json.dumps({'conversion_id': str(cid), 'total_slides': total})}\n\n"
+            if current_status == "failed":
+                yield f"event: error\ndata: {json.dumps({'message': error_message or 'Generation failed'})}\n\n"
+                return
+
+            if current_status == "cancelled":
+                yield f"event: error\ndata: {json.dumps({'message': 'Generation was cancelled'})}\n\n"
+                return
+
+            # Fetch any new slides not yet sent
+            slides_result = await db.execute(
+                sa.text(
+                    "SELECT id, position, layout, title, bullets, speaker_notes, color_scheme, shape_style "
+                    "FROM slides WHERE conversion_id=:cid AND is_deleted=false ORDER BY position"
+                ),
+                {"cid": str(cid)},
+            )
+            all_slides = slides_result.fetchall()
+            total_so_far = len(all_slides)
+
+            for row in all_slides:
+                pos = row[1]
+                if pos not in seen_positions:
+                    seen_positions.add(pos)
+                    slides_emitted += 1
+                    slide_data = {
+                        "id": str(row[0]),
+                        "position": pos,
+                        "layout": row[2],
+                        "title": row[3],
+                        "bullets": row[4] if isinstance(row[4], list) else [],
+                        "speaker_notes": row[5] or "",
+                        "color_scheme": row[6] or "default",
+                        "shape_style": row[7] or "square",
+                    }
+                    yield f"event: slide_start\ndata: {json.dumps({'index': pos, 'total': expected_total or total_so_far})}\n\n"
+                    yield f"event: slide_done\ndata: {json.dumps({'slide': slide_data})}\n\n"
+                    yield f"event: progress\ndata: {json.dumps({'completed': slides_emitted, 'total': expected_total or total_so_far})}\n\n"
+
+            if current_status == "done":
+                yield f"event: done\ndata: {json.dumps({'conversion_id': str(cid), 'total_slides': total_so_far})}\n\n"
+                return
+
+            # Still generating — wait before next poll
+            await asyncio.sleep(1.5)
 
     return StreamingResponse(
         event_generator(),
