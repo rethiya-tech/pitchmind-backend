@@ -317,6 +317,15 @@ async def insert_slide(
     db.add(slide)
     await db.flush()
 
+    await db.execute(
+        sa.text(
+            "UPDATE conversions SET slide_count = ("
+            "  SELECT COUNT(*) FROM slides WHERE conversion_id = :cid AND is_deleted = false"
+            ") WHERE id = :cid"
+        ),
+        {"cid": str(cid)},
+    )
+
     from app.schemas.slide import SlideOut as SlideSchemaOut
     return SlideSchemaOut.model_validate(slide)
 
