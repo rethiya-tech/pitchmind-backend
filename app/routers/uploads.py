@@ -42,7 +42,7 @@ async def presign_upload(
         parse_status="pending",
     )
     db.add(upload)
-    await db.flush()
+    await db.commit()  # commit before returning so local_upload can find the row immediately
 
     # Always route the PUT through the backend (avoids GCS CORS requirements).
     # Use explicit BACKEND_URL if set; otherwise reconstruct from forwarded headers
