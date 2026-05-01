@@ -29,6 +29,7 @@ async def presign_upload(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    settings = get_settings()
     gcs_key = gcs.generate_upload_key(str(current_user.id), body.filename)
 
     upload = Upload(
@@ -43,9 +44,15 @@ async def presign_upload(
     db.add(upload)
     await db.flush()
 
-    # Always route the PUT through the backend so the browser never talks to GCS
-    # directly. This avoids the need to configure GCS CORS for the frontend domain.
-    base = str(request.base_url).rstrip("/")
+    # Always route the PUT through the backend (avoids GCS CORS requirements).
+    # Use explicit BACKEND_URL if set; otherwise reconstruct from forwarded headers
+    # since request.base_url is the internal address behind Render/nginx proxies.
+    if settings.BACKEND_URL:
+        base = settings.BACKEND_URL.rstrip("/")
+    else:
+        proto = request.headers.get("x-forwarded-proto", request.url.scheme)
+        host = request.headers.get("x-forwarded-host") or request.headers.get("host", "")
+        base = f"{proto}://{host}" if host else str(request.base_url).rstrip("/")
     upload_url = f"{base}/api/v1/uploads/{upload.id}/local"
 
     return PresignResponse(

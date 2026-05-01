@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     GCS_CREDENTIALS_JSON: str = ""
 
     FRONTEND_URL: str = "http://localhost:5173"
+    BACKEND_URL: str = ""   # e.g. https://pitchmind-api.onrender.com — leave blank to auto-detect
     ENVIRONMENT: str = "development"
 
 
