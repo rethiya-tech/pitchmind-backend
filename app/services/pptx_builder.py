@@ -591,49 +591,75 @@ def _clone_slide(prs: Any, source_idx: int) -> None:
         parent.insert(idx_in_parent, deepcopy(src_cSld))
 
 
+def _set_tf_text(tf: Any, lines: list[str]) -> None:
+    """Replace a text frame's content with lines, preserving first-run formatting."""
+    first_runs = tf.paragraphs[0].runs if tf.paragraphs else []
+    sample_run_xml = deepcopy(first_runs[0]._r) if first_runs else None
+    txBody = tf._txBody
+    for p_elem in list(txBody.findall(qn("a:p"))):
+        txBody.remove(p_elem)
+    for line in (lines if lines else [""]):
+        p_elem = etree.SubElement(txBody, qn("a:p"))
+        r_elem = deepcopy(sample_run_xml) if sample_run_xml is not None else etree.SubElement(p_elem, qn("a:r"))
+        t_elem = r_elem.find(qn("a:t"))
+        if t_elem is None:
+            t_elem = etree.SubElement(r_elem, qn("a:t"))
+        t_elem.text = line
+        p_elem.append(r_elem)
+
+
 def _update_slide_placeholders(slide: Any, title: str, bullets: list[str], notes: str) -> None:
-    """Update title and body placeholders in a slide; leave all visuals intact."""
+    """Update title and body placeholders in a slide; leave all visuals intact.
+
+    Falls back to updating the two largest textboxes (by area) when the slide
+    has no title/body placeholder shapes — common in hand-crafted PPTX files.
+    """
+    title_updated = False
+    body_updated = False
+
     for shape in slide.shapes:
-        if not shape.has_text_frame or not shape.is_placeholder:
+        if not shape.has_text_frame:
+            continue
+        if not shape.is_placeholder:
             continue
         ph_idx = shape.placeholder_format.idx
         tf = shape.text_frame
 
         if ph_idx == 0:
-            # Title placeholder — replace text preserving first paragraph formatting
             p0 = tf.paragraphs[0]
-            # Keep the first run's font formatting, just swap the text
             if p0.runs:
                 p0.runs[0].text = title
                 for run in p0.runs[1:]:
                     run.text = ""
             else:
                 p0.text = title
-            # Remove extra paragraphs
             for extra_p in list(tf.paragraphs[1:]):
-                p_elem = extra_p._p
-                p_elem.getparent().remove(p_elem)
+                extra_p._p.getparent().remove(extra_p._p)
+            title_updated = True
 
         elif ph_idx in (1, 2, 13, 14, 15):
-            # Body / content placeholder — replace with bullet lines
-            # Capture formatting from first run of first paragraph
-            first_runs = tf.paragraphs[0].runs if tf.paragraphs else []
-            sample_run_xml = deepcopy(first_runs[0]._r) if first_runs else None
+            _set_tf_text(tf, bullets)
+            body_updated = True
 
-            # Clear all existing paragraph elements
-            txBody = tf._txBody
-            for p_elem in list(txBody.findall(qn("a:p"))):
-                txBody.remove(p_elem)
-
-            for bullet_text in (bullets if bullets else [""]):
-                p_elem = etree.SubElement(txBody, qn("a:p"))
-                r_elem = deepcopy(sample_run_xml) if sample_run_xml is not None else etree.SubElement(p_elem, qn("a:r"))
-                # Update the run text
-                t_elem = r_elem.find(qn("a:t"))
-                if t_elem is None:
-                    t_elem = etree.SubElement(r_elem, qn("a:t"))
-                t_elem.text = bullet_text
-                p_elem.append(r_elem)
+    # Fallback: no placeholders found — update textboxes sorted by vertical position
+    if not title_updated or not body_updated:
+        textboxes = sorted(
+            [s for s in slide.shapes if s.has_text_frame and not s.is_placeholder],
+            key=lambda s: (s.top, s.left),
+        )
+        if not title_updated and textboxes:
+            tb = textboxes[0]
+            p0 = tb.text_frame.paragraphs[0]
+            if p0.runs:
+                p0.runs[0].text = title
+                for run in p0.runs[1:]:
+                    run.text = ""
+            else:
+                p0.text = title
+            for extra_p in list(tb.text_frame.paragraphs[1:]):
+                extra_p._p.getparent().remove(extra_p._p)
+        if not body_updated and len(textboxes) > 1:
+            _set_tf_text(textboxes[1].text_frame, bullets)
 
     if notes:
         try:

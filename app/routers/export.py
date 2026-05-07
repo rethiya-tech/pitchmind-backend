@@ -73,13 +73,8 @@ def _build_pptx_bytes(conv: Any, slides: list, upload: Any = None) -> bytes:
             return pptx_builder.build_pptx_from_template(slides, template_bytes)
         _log.warning("Export %s: template PPTX missing at %s, falling back", conv.id, conv.source_pptx_key)
 
-    # 2. Direct PPTX upload
-    if upload and upload.mime_type == PPTX_MIME:
-        upload_bytes = gcs.read_upload_bytes(upload.gcs_key, str(upload.id))
-        if upload_bytes:
-            _log.info("Export %s: using original uploaded PPTX", conv.id)
-            return pptx_builder.build_pptx_from_template(slides, upload_bytes)
-        _log.warning("Export %s: uploaded PPTX missing at %s, falling back", conv.id, upload.gcs_key)
+    # 2. Direct PPTX upload — use theme builder so edited content is exported,
+    #    not the original file (template-preserving path is only for explicit template copies)
 
     # 3. App theme builder
     theme_id = conv.theme or "executive_gold"
