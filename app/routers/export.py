@@ -119,7 +119,7 @@ async def export_pptx(
     pptx_bytes = _build_pptx_bytes(conv, slides, upload)
 
     if not gcs.is_configured():
-        base = str(request.base_url).rstrip("/")
+        base = (settings.BACKEND_URL or str(request.base_url)).rstrip("/")
         download_url = f"{base}/api/v1/conversions/{cid}/download"
         expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
         return ExportResponse(download_url=download_url, expires_at=expires_at)
