@@ -179,6 +179,13 @@ async def create_conversion(
         )
         db.add(conv)
         doc_text = body.prompt_text
+        if body.questionnaire_answers:
+            answered = [item for item in body.questionnaire_answers if item.answer.strip()]
+            if answered:
+                qa_lines = "\n\n## Additional Context\n"
+                for item in answered:
+                    qa_lines += f"\nQ: {item.question}\nA: {item.answer}\n"
+                doc_text = doc_text + qa_lines
 
     # ── File upload mode ──────────────────────────────────────────────────────
     else:
@@ -233,6 +240,14 @@ async def create_conversion(
             doc_text = upload.parsed_preview
         else:
             doc_text = f"Document: {upload.original_filename}\n\nPlease generate a {body.slide_count}-slide presentation."
+
+        if body.questionnaire_answers:
+            answered = [item for item in body.questionnaire_answers if item.answer.strip()]
+            if answered:
+                qa_lines = "\n\n## Additional Context\n"
+                for item in answered:
+                    qa_lines += f"\nQ: {item.question}\nA: {item.answer}\n"
+                doc_text = doc_text + qa_lines
 
         # For PPTX uploads with clear slide structure, extract directly
         if upload.mime_type in PPTX_MIMES and upload.parsed_doc:

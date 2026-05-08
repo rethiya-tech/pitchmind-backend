@@ -20,6 +20,11 @@ VALID_STYLES = {"professional", "creative", "minimal", "bold", "executive", "tec
 VALID_AUDIENCES = {"c-suite", "technical", "general", "investors", "sales", "executive"}
 
 
+class QAItem(BaseModel):
+    question: str
+    answer: str
+
+
 class ConversionCreate(BaseModel):
     upload_id: uuid.UUID | None = None
     prompt_text: str | None = None
@@ -28,6 +33,7 @@ class ConversionCreate(BaseModel):
     audience_level: str = "general"
     slide_count: int = 10
     speaker_notes: bool = True
+    questionnaire_answers: list[QAItem] = []
 
     @field_validator("theme")
     @classmethod

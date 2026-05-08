@@ -272,6 +272,47 @@ async def _call_ai_text(prompt: str, max_tokens: int = 512) -> str:
     raise ValueError("No AI API key configured")
 
 
+_STUB_QUESTIONS = [
+    "Who is the primary target audience for this presentation?",
+    "What is the single most important message you want the audience to take away?",
+    "What tone should the presentation have (formal, inspiring, educational, persuasive)?",
+    "Are there specific data points, statistics, or case studies you want to include?",
+    "What problem does your presentation address, and what is your proposed solution?",
+    "What makes your approach unique compared to existing alternatives?",
+    "What is the desired outcome — what should the audience do after seeing this?",
+    "Are there any constraints or requirements (brand guidelines, time limit, slide count)?",
+    "What background knowledge can you assume the audience already has?",
+    "Are there any topics or angles that should be avoided or handled carefully?",
+]
+
+
+async def generate_questions(prompt: str) -> list[str]:
+    """Generate 10 clarifying questions for a presentation prompt."""
+    settings = get_settings()
+
+    system = (
+        "You are a presentation strategist. Given a topic or prompt, produce exactly 10 "
+        "targeted clarifying questions that will help generate better slides. "
+        "Return ONLY a JSON array of 10 strings. No markdown fences, no explanation. "
+        'Example: ["Question 1?", "Question 2?", ...]'
+    )
+    user_msg = f"Presentation topic/prompt:\n{prompt}"
+
+    try:
+        text = await _call_ai_text(f"{system}\n\n{user_msg}", max_tokens=1024)
+        text = strip_fences(text)
+        start = text.find("[")
+        if start == -1:
+            raise ValueError("No JSON array in response")
+        questions = json.loads(text[start:])
+        if isinstance(questions, list):
+            return [str(q) for q in questions[:10]]
+        raise ValueError("Not a list")
+    except Exception:
+        # Fall back to generic questions if AI call fails or no key
+        return list(_STUB_QUESTIONS)
+
+
 def friendly_error(exc: Exception) -> str:
     msg = str(exc)
     low = msg.lower()
