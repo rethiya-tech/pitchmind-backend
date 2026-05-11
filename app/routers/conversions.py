@@ -55,6 +55,7 @@ async def _generate_slides_task(
     theme: str,
     original_filename: str,
     user_id: uuid.UUID,
+    presentation_flags: list[str] = [],
 ) -> None:
     """Background task: calls AI and saves slides, then marks conversion done/failed.
 
@@ -79,6 +80,7 @@ async def _generate_slides_task(
                 style=style,
                 audience_level=audience_level,
                 slide_count=slide_count,
+                presentation_flags=presentation_flags,
             )
             raw_response, tokens_used = await claude.call_claude(system_prompt, doc_text)
             validated = claude.validate_slides(raw_response)
@@ -114,11 +116,24 @@ async def _generate_slides_task(
 
         # 4. Mark as done (brief DB write)
         presentation_name = validated[0].get("title", "").strip() if validated else ""
+        total_tokens = 0
+        in_text = 0
+        out_text = 0
+        if isinstance(tokens_used, dict):
+            in_text = tokens_used.get("input", 0)
+            out_text = tokens_used.get("output", 0)
+            total_tokens = in_text + out_text
+        else:
+            total_tokens = int(tokens_used or 0)
+
         await _db_exec(
             "UPDATE conversions SET status='done', tokens_used=:tokens, "
+            "input_text_tokens=:in_text, output_text_tokens=:out_text, "
             "completed_at=:completed, slide_count=:sc, name=:name WHERE id=:id",
             {
-                "tokens": tokens_used,
+                "tokens": total_tokens,
+                "in_text": in_text,
+                "out_text": out_text,
                 "completed": datetime.now(timezone.utc),
                 "sc": len(validated),
                 "name": presentation_name or None,
@@ -285,6 +300,7 @@ async def create_conversion(
         theme=body.theme,
         original_filename=conv.original_filename or "",
         user_id=current_user.id,
+        presentation_flags=body.presentation_flags,
     ))
 
     return ConversionCreateResponse(

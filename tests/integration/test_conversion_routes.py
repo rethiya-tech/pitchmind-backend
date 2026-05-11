@@ -134,3 +134,48 @@ async def test_cancel_conversion_sets_cancelled_status(test_client, test_token, 
 async def test_stream_endpoint_requires_auth_token_param(test_client, db_session):
     resp = await test_client.get("/api/v1/conversions/fake-id/stream")
     assert resp.status_code == 401
+
+
+async def test_create_conversion_with_valid_flags_returns_201(
+    test_client, test_token, mock_claude, db_session
+):
+    with patch("app.services.gcs.get_signed_upload_url",
+               return_value="https://storage.googleapis.com/upload-url"):
+        presign = await test_client.post(
+            "/api/v1/uploads/presign",
+            json={"filename": "report.pdf", "content_type": "application/pdf"},
+            headers={"Authorization": f"Bearer {test_token}"},
+        )
+    upload_id = presign.json()["upload_id"]
+
+    resp = await test_client.post(
+        "/api/v1/conversions",
+        json={
+            "upload_id": upload_id,
+            "theme": "clean_slate",
+            "style": "professional",
+            "audience_level": "general",
+            "slide_count": 8,
+            "presentation_flags": ["minimal", "roadmap"],
+        },
+        headers={"Authorization": f"Bearer {test_token}"},
+    )
+    assert resp.status_code == 201
+
+
+async def test_create_conversion_with_invalid_flag_returns_422(
+    test_client, test_token
+):
+    resp = await test_client.post(
+        "/api/v1/conversions",
+        json={
+            "upload_id": "00000000-0000-0000-0000-000000000001",
+            "theme": "clean_slate",
+            "style": "professional",
+            "audience_level": "general",
+            "slide_count": 8,
+            "presentation_flags": ["not_a_real_flag"],
+        },
+        headers={"Authorization": f"Bearer {test_token}"},
+    )
+    assert resp.status_code == 422
