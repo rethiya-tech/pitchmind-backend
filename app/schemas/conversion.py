@@ -69,7 +69,7 @@ class ConversionCreate(BaseModel):
     def validate_flags(cls, v: list[str]) -> list[str]:
         invalid = set(v) - VALID_FLAGS
         if invalid:
-            raise ValueError(f"Invalid flags: {invalid}")
+            raise ValueError(f"Invalid flags: {', '.join(sorted(invalid))}. Valid: {', '.join(sorted(VALID_FLAGS))}")
         return list(set(v))  # deduplicate
 
     def model_post_init(self, __context: object) -> None:
@@ -83,7 +83,6 @@ class SlideOut(BaseModel):
     layout: str
     title: str | None
     bullets: list[str]
-    text_styles: dict = {}
     speaker_notes: str | None
     is_deleted: bool
     color_scheme: str = "default"
