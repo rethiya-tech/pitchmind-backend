@@ -79,3 +79,59 @@ def test_valid_json_without_fences_parses_correctly():
     plain = '{"slides": []}'
     result = strip_fences(plain)
     assert result == '{"slides": []}'
+
+
+def test_build_prompt_no_flags_has_no_format_overrides():
+    from app.services.claude import build_system_prompt
+    prompt = build_system_prompt(style="professional", audience_level="general", slide_count=10)
+    assert "FORMAT OVERRIDES" not in prompt
+
+
+def test_build_prompt_minimal_flag_injects_instruction():
+    from app.services.claude import build_system_prompt
+    prompt = build_system_prompt(
+        style="professional", audience_level="general", slide_count=10,
+        presentation_flags=["minimal"]
+    )
+    assert "FORMAT OVERRIDES" in prompt
+    assert "Max 3 bullets per slide" in prompt
+
+
+def test_build_prompt_roadmap_flag_injects_instruction():
+    from app.services.claude import build_system_prompt
+    prompt = build_system_prompt(
+        style="professional", audience_level="general", slide_count=10,
+        presentation_flags=["roadmap"]
+    )
+    assert "FORMAT OVERRIDES" in prompt
+    assert "timeline" in prompt.lower()
+
+
+def test_build_prompt_data_focus_flag_injects_instruction():
+    from app.services.claude import build_system_prompt
+    prompt = build_system_prompt(
+        style="professional", audience_level="general", slide_count=10,
+        presentation_flags=["data_focus"]
+    )
+    assert "FORMAT OVERRIDES" in prompt
+    assert "big_stat" in prompt
+
+
+def test_build_prompt_multiple_flags_injects_all_instructions():
+    from app.services.claude import build_system_prompt
+    prompt = build_system_prompt(
+        style="professional", audience_level="general", slide_count=10,
+        presentation_flags=["minimal", "roadmap", "data_focus"]
+    )
+    assert "Max 3 bullets per slide" in prompt
+    assert "timeline" in prompt.lower()
+    assert "big_stat" in prompt
+
+
+def test_build_prompt_empty_flags_has_no_format_overrides():
+    from app.services.claude import build_system_prompt
+    prompt = build_system_prompt(
+        style="professional", audience_level="general", slide_count=10,
+        presentation_flags=[]
+    )
+    assert "FORMAT OVERRIDES" not in prompt

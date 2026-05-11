@@ -59,12 +59,41 @@ RULES:
 """
 
 
-def build_system_prompt(style: str, audience_level: str, slide_count: int) -> str:
-    return SYSTEM_PROMPT_TEMPLATE.format(
+_FLAG_INSTRUCTIONS: dict[str, str] = {
+    "minimal": (
+        "Max 3 bullets per slide. Prefer `hero` and `bullets` layouts. "
+        "Avoid `data_table`, `timeline`, and `two_column` unless the content "
+        "is exclusively about data or comparisons."
+    ),
+    "roadmap": (
+        "Include exactly one `timeline` layout slide showing key phases, "
+        "milestones, or a project roadmap derived from the document."
+    ),
+    "data_focus": (
+        "When the document contains numbers or metrics, prefer `big_stat` "
+        "and `data_table` layouts. Aim for at least 2 data-oriented slides."
+    ),
+}
+
+
+def build_system_prompt(
+    style: str,
+    audience_level: str,
+    slide_count: int,
+    presentation_flags: list[str] = [],
+) -> str:
+    base = SYSTEM_PROMPT_TEMPLATE.format(
         STYLE=style,
         AUDIENCE_LEVEL=audience_level,
         SLIDE_COUNT=slide_count,
     )
+    active_flags = [f for f in presentation_flags if f in _FLAG_INSTRUCTIONS]
+    if not active_flags:
+        return base
+    overrides = "\n\nFORMAT OVERRIDES (apply on top of all rules above):\n"
+    for flag in active_flags:
+        overrides += f"- {_FLAG_INSTRUCTIONS[flag]}\n"
+    return base + overrides
 
 
 def strip_fences(text: str) -> str:
@@ -419,7 +448,7 @@ def _stub_slides(system: str, slide_count: int) -> tuple[dict, int]:
             "shape_style": "square",
         },
     ]
-    return {"slides": deck[:n]}, 0
+    return {"slides": deck[:n]}, {"input": 0, "output": 0}
 
 
 async def _call_gemini(system: str, user_message: str) -> tuple[dict, int]:
@@ -437,8 +466,9 @@ async def _call_gemini(system: str, user_message: str) -> tuple[dict, int]:
     )
     text = strip_fences(response.text.strip())
     result = json.loads(text)
-    tokens = response.usage_metadata.total_token_count if response.usage_metadata else 0
-    return result, tokens
+    input_tokens = response.usage_metadata.prompt_token_count if response.usage_metadata else 0
+    output_tokens = response.usage_metadata.candidates_token_count if response.usage_metadata else 0
+    return result, {"input": input_tokens, "output": output_tokens}
 
 
 def _tokens_for_slides(system: str) -> int:
@@ -460,8 +490,7 @@ async def _call_anthropic(system: str, user_message: str) -> tuple[dict, int]:
     )
     text = strip_fences(response.content[0].text.strip())
     result = json.loads(text)
-    tokens = response.usage.input_tokens + response.usage.output_tokens
-    return result, tokens
+    return result, {"input": response.usage.input_tokens, "output": response.usage.output_tokens}
 
 
 @retry(
@@ -469,7 +498,7 @@ async def _call_anthropic(system: str, user_message: str) -> tuple[dict, int]:
     wait=wait_exponential(multiplier=1, min=2, max=8),
     reraise=True,
 )
-async def call_claude(system: str, user_message: str) -> tuple[dict, int]:
+async def call_claude(system: str, user_message: str) -> tuple[dict, dict]:
     settings = get_settings()
 
     if settings.GEMINI_API_KEY:
