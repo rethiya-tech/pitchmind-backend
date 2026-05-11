@@ -135,3 +135,12 @@ def test_build_prompt_empty_flags_has_no_format_overrides():
         presentation_flags=[]
     )
     assert "FORMAT OVERRIDES" not in prompt
+
+
+def test_build_prompt_unknown_flag_is_silently_ignored():
+    from app.services.claude import build_system_prompt
+    prompt = build_system_prompt(
+        style="professional", audience_level="general", slide_count=10,
+        presentation_flags=["not_a_real_flag"]
+    )
+    assert "FORMAT OVERRIDES" not in prompt

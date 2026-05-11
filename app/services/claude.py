@@ -362,7 +362,7 @@ def _is_placeholder_anthropic_key(key: str) -> bool:
     return not key or "placeholder" in key.lower() or not key.startswith("sk-ant-")
 
 
-def _stub_slides(system: str, slide_count: int) -> tuple[dict, int]:
+def _stub_slides(system: str, slide_count: int) -> tuple[dict, dict]:
     m = re.search(r"approximately (\d+)", system)
     n = int(m.group(1)) if m else slide_count
     # Pitch deck structure with editable placeholder text
@@ -451,7 +451,7 @@ def _stub_slides(system: str, slide_count: int) -> tuple[dict, int]:
     return {"slides": deck[:n]}, {"input": 0, "output": 0}
 
 
-async def _call_gemini(system: str, user_message: str) -> tuple[dict, int]:
+async def _call_gemini(system: str, user_message: str) -> tuple[dict, dict]:
     from google import genai
     from google.genai import types
     settings = get_settings()
@@ -478,7 +478,7 @@ def _tokens_for_slides(system: str) -> int:
     return min(8192, max(4096, n * 400))
 
 
-async def _call_anthropic(system: str, user_message: str) -> tuple[dict, int]:
+async def _call_anthropic(system: str, user_message: str) -> tuple[dict, dict]:
     from anthropic import AsyncAnthropic
     settings = get_settings()
     client = AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
