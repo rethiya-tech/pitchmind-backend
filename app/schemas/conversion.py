@@ -18,6 +18,7 @@ VALID_THEMES = {
 
 VALID_STYLES = {"professional", "creative", "minimal", "bold", "executive", "technical", "narrative", "concise", "academic"}
 VALID_AUDIENCES = {"c-suite", "technical", "general", "investors", "sales", "executive"}
+VALID_FLAGS = {"minimal", "roadmap", "data_focus"}
 
 
 class QAItem(BaseModel):
@@ -34,6 +35,7 @@ class ConversionCreate(BaseModel):
     slide_count: int = 10
     speaker_notes: bool = True
     questionnaire_answers: list[QAItem] = []
+    presentation_flags: list[str] = []
 
     @field_validator("theme")
     @classmethod
@@ -62,6 +64,14 @@ class ConversionCreate(BaseModel):
                 raise ValueError("Prompt must not exceed 3000 characters")
         return v
 
+    @field_validator("presentation_flags")
+    @classmethod
+    def validate_flags(cls, v: list[str]) -> list[str]:
+        invalid = set(v) - VALID_FLAGS
+        if invalid:
+            raise ValueError(f"Invalid flags: {invalid}")
+        return list(set(v))  # deduplicate
+
     def model_post_init(self, __context: object) -> None:
         if not self.upload_id and not self.prompt_text:
             raise ValueError("Either upload_id or prompt_text is required")
@@ -73,6 +83,7 @@ class SlideOut(BaseModel):
     layout: str
     title: str | None
     bullets: list[str]
+    text_styles: dict = {}
     speaker_notes: str | None
     is_deleted: bool
     color_scheme: str = "default"
