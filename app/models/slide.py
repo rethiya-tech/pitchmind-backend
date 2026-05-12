@@ -31,7 +31,11 @@ class Slide(Base):
     bullets: Mapped[Any] = mapped_column(
         JSONB, nullable=False, server_default="[]", default=list,
     )
+    text_styles: Mapped[Any] = mapped_column(
+        JSONB, nullable=False, server_default="{}", default=dict,
+    )
     speaker_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    background_image_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_deleted: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default="false", default=False,
     )

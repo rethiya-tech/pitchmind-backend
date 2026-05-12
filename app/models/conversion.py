@@ -32,6 +32,24 @@ class Conversion(Base):
     tokens_used: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default="0", default=0,
     )
+    input_text_tokens: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="0", default=0,
+    )
+    output_text_tokens: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="0", default=0,
+    )
+    input_audio_tokens: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="0", default=0,
+    )
+    output_audio_tokens: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="0", default=0,
+    )
+    summary_input_tokens: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="0", default=0,
+    )
+    summary_output_tokens: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="0", default=0,
+    )
     retry_count: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default="0", default=0,
     )

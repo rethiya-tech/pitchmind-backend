@@ -18,6 +18,30 @@ class AdminMetrics(BaseModel):
     ai_cost_total_usd: float = 0.0
     total_tokens: int = 0
 
+    # Detailed Token Metrics (Today)
+    input_text_tokens_today: int = 0
+    output_text_tokens_today: int = 0
+    input_audio_tokens_today: int = 0
+    output_audio_tokens_today: int = 0
+    summary_input_tokens_today: int = 0
+    summary_output_tokens_today: int = 0
+
+    # Detailed Token Metrics (Total)
+    input_text_tokens_total: int = 0
+    output_text_tokens_total: int = 0
+    input_audio_tokens_total: int = 0
+    output_audio_tokens_total: int = 0
+    summary_input_tokens_total: int = 0
+    summary_output_tokens_total: int = 0
+
+    # Costs (Today)
+    cost_input_text_today: float = 0.0
+    cost_output_text_today: float = 0.0
+    cost_input_audio_today: float = 0.0
+    cost_output_audio_today: float = 0.0
+    cost_summary_input_today: float = 0.0
+    cost_summary_output_today: float = 0.0
+
 
 class AdminUserOut(BaseModel):
     id: uuid.UUID

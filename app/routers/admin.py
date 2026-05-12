@@ -35,34 +35,88 @@ async def get_metrics(
     total_conv_result = await db.execute(sa.text("SELECT COUNT(*) FROM conversions"))
     total_conversions = total_conv_result.scalar() or 0
 
-    conv_today = await db.execute(
+    conv_today_res = await db.execute(
         sa.text(
             "SELECT COUNT(*) FROM conversions "
             "WHERE created_at >= NOW() - INTERVAL '1 day'"
         )
     )
-    conversions_today = conv_today.scalar() or 0
+    conversions_today = conv_today_res.scalar() or 0
 
-    failed_today = await db.execute(
+    failed_today_res = await db.execute(
         sa.text(
             "SELECT COUNT(*) FROM conversions "
             "WHERE status = 'failed' AND created_at >= NOW() - INTERVAL '1 day'"
         )
     )
-    failed = failed_today.scalar() or 0
+    failed = failed_today_res.scalar() or 0
 
-    cost_result = await db.execute(
+    # Detailed Token Query (Today)
+    tokens_today_res = await db.execute(
         sa.text(
-            "SELECT COALESCE(SUM(tokens_used), 0) FROM conversions "
+            "SELECT "
+            "  COALESCE(SUM(tokens_used), 0), "
+            "  COALESCE(SUM(input_text_tokens), 0), "
+            "  COALESCE(SUM(output_text_tokens), 0), "
+            "  COALESCE(SUM(input_audio_tokens), 0), "
+            "  COALESCE(SUM(output_audio_tokens), 0), "
+            "  COALESCE(SUM(summary_input_tokens), 0), "
+            "  COALESCE(SUM(summary_output_tokens), 0) "
+            "FROM conversions "
             "WHERE created_at >= NOW() - INTERVAL '1 day'"
         )
     )
-    tokens_today = cost_result.scalar() or 0
+    t_today = tokens_today_res.fetchone()
+    tokens_today = t_today[0]
+    in_text_today = t_today[1]
+    out_text_today = t_today[2]
+    in_audio_today = t_today[3]
+    out_audio_today = t_today[4]
+    sum_in_today = t_today[5]
+    sum_out_today = t_today[6]
 
-    total_tokens_result = await db.execute(
-        sa.text("SELECT COALESCE(SUM(tokens_used), 0) FROM conversions")
+    # Detailed Token Query (Total)
+    tokens_total_res = await db.execute(
+        sa.text(
+            "SELECT "
+            "  COALESCE(SUM(tokens_used), 0), "
+            "  COALESCE(SUM(input_text_tokens), 0), "
+            "  COALESCE(SUM(output_text_tokens), 0), "
+            "  COALESCE(SUM(input_audio_tokens), 0), "
+            "  COALESCE(SUM(output_audio_tokens), 0), "
+            "  COALESCE(SUM(summary_input_tokens), 0), "
+            "  COALESCE(SUM(summary_output_tokens), 0) "
+            "FROM conversions"
+        )
     )
-    total_tokens = total_tokens_result.scalar() or 0
+    t_total = tokens_total_res.fetchone()
+    total_tokens = t_total[0]
+    in_text_total = t_total[1]
+    out_text_total = t_total[2]
+    in_audio_total = t_total[3]
+    out_audio_total = t_total[4]
+    sum_in_total = t_total[5]
+    sum_out_total = t_total[6]
+
+    # Individual Costs Today
+    cost_in_text = float(in_text_today) * 0.0000005
+    cost_out_text = float(out_text_today) * 0.000002
+    cost_in_audio = float(in_audio_today) * 0.000003
+    cost_out_audio = float(out_audio_today) * 0.000012
+    cost_sum_in = float(sum_in_today) * 0.000001
+    cost_sum_out = float(sum_out_today) * 0.0000025
+
+    ai_cost_today = cost_in_text + cost_out_text + cost_in_audio + cost_out_audio + cost_sum_in + cost_sum_out
+
+    # All-time cost (rough calculation using same rates)
+    ai_cost_total = (
+        float(in_text_total) * 0.0000005 +
+        float(out_text_total) * 0.000002 +
+        float(in_audio_total) * 0.000003 +
+        float(out_audio_total) * 0.000012 +
+        float(sum_in_total) * 0.000001 +
+        float(sum_out_total) * 0.0000025
+    )
 
     done_result = await db.execute(
         sa.text("SELECT COUNT(*) FROM conversions WHERE status = 'done'")
@@ -90,9 +144,33 @@ async def get_metrics(
         failed_today=failed,
         total_slides=total_slides,
         success_rate=success_rate,
-        ai_cost_today_usd=float(tokens_today) * 0.000003,
-        ai_cost_total_usd=float(total_tokens) * 0.000003,
+        ai_cost_today_usd=ai_cost_today,
+        ai_cost_total_usd=ai_cost_total,
         total_tokens=total_tokens,
+
+        # Detailed Token Metrics (Today)
+        input_text_tokens_today=in_text_today,
+        output_text_tokens_today=out_text_today,
+        input_audio_tokens_today=in_audio_today,
+        output_audio_tokens_today=out_audio_today,
+        summary_input_tokens_today=sum_in_today,
+        summary_output_tokens_today=sum_out_today,
+
+        # Detailed Token Metrics (Total)
+        input_text_tokens_total=in_text_total,
+        output_text_tokens_total=out_text_total,
+        input_audio_tokens_total=in_audio_total,
+        output_audio_tokens_total=out_audio_total,
+        summary_input_tokens_total=sum_in_total,
+        summary_output_tokens_total=sum_out_total,
+
+        # Costs (Today)
+        cost_input_text_today=cost_in_text,
+        cost_output_text_today=cost_out_text,
+        cost_input_audio_today=cost_in_audio,
+        cost_output_audio_today=cost_out_audio,
+        cost_summary_input_today=cost_sum_in,
+        cost_summary_output_today=cost_sum_out,
     )
 
 

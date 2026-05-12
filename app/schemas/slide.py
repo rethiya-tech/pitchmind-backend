@@ -7,16 +7,19 @@ from pydantic import BaseModel
 class SlidePatch(BaseModel):
     title: str | None = None
     bullets: list[str] | None = None
+    text_styles: dict | None = None
     speaker_notes: str | None = None
     layout: str | None = None
     color_scheme: str | None = None
     shape_style: str | None = None
+    background_image_url: str | None = None
 
 
 class SlideInsert(BaseModel):
     position: int = 0
     title: str = ""
     bullets: list[str] = []
+    text_styles: dict = {}
     speaker_notes: str = ""
     layout: str = "bullets"
     color_scheme: str = "default"
@@ -36,7 +39,9 @@ class SlideOut(BaseModel):
     shape_style: str
     title: str | None
     bullets: list[str]
+    text_styles: dict = {}
     speaker_notes: str | None
+    background_image_url: str | None = None
     is_deleted: bool
     updated_at: datetime
 
