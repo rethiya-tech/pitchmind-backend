@@ -77,11 +77,11 @@ def _build_pptx_bytes(conv: Any, slides: list, upload: Any = None) -> bytes:
     #    not the original file (template-preserving path is only for explicit template copies)
 
     # 3. App theme builder
-    theme_id = conv.theme or "executive_gold"
+    theme_id = conv.theme or "clean_slate"
     try:
         theme = theme_svc.get_theme(theme_id)
     except KeyError:
-        theme = theme_svc.get_theme("executive_gold")
+        theme = theme_svc.get_theme("clean_slate")
     return pptx_builder.build_pptx(slides, theme)
 
 

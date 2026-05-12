@@ -462,10 +462,37 @@ async def _call_gemini(system: str, user_message: str) -> tuple[dict, dict]:
         config=types.GenerateContentConfig(
             system_instruction=system,
             max_output_tokens=_tokens_for_slides(system),
+            thinking_config=types.ThinkingConfig(thinking_budget=0),
         ),
     )
-    text = strip_fences(response.text.strip())
-    result = json.loads(text)
+    # Robustly extract text — gemini-2.5-flash thinking model can fail .text
+    text = None
+    finish_reason = None
+    try:
+        if response.candidates:
+            finish_reason = str(getattr(response.candidates[0], "finish_reason", ""))
+        text = response.text
+    except Exception:
+        pass
+    if not text:
+        try:
+            text = response.candidates[0].content.parts[0].text
+        except Exception:
+            pass
+    if not text:
+        _log.error("Gemini slide generation empty response. finish_reason=%s", finish_reason)
+        raise ValueError("AI returned an empty response — please try again")
+    text = strip_fences(text.strip())
+    # Extract JSON object even if there's surrounding text
+    start = text.find("{")
+    if start == -1:
+        _log.error("Gemini slide generation: no JSON object found. raw=%r", text[:300])
+        raise ValueError("AI returned an unexpected response. Please try again with fewer slides.")
+    try:
+        result, _ = json.JSONDecoder().raw_decode(text, start)
+    except json.JSONDecodeError as exc:
+        _log.error("Gemini slide generation JSON parse failed. raw=%r", text[:300])
+        raise ValueError("AI returned an unexpected response. Please try again with fewer slides.") from exc
     input_tokens = response.usage_metadata.prompt_token_count if response.usage_metadata else 0
     output_tokens = response.usage_metadata.candidates_token_count if response.usage_metadata else 0
     return result, {"input": input_tokens, "output": output_tokens}
