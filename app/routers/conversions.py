@@ -85,6 +85,43 @@ async def _generate_slides_task(
             raw_response, tokens_used = await claude.call_claude(system_prompt, doc_text)
             validated = claude.validate_slides(raw_response)
 
+        # Enforce roadmap flag: guarantee at least one timeline slide exists
+        if "roadmap" in presentation_flags and pptx_slides is None:
+            has_timeline = any(s.get("layout") == "timeline" for s in validated)
+            if not has_timeline:
+                _ROADMAP_KEYWORDS = {"roadmap", "timeline", "phases", "milestones", "plan", "schedule", "stages", "journey"}
+                best_idx = None
+                for i, s in enumerate(validated):
+                    if i == 0:
+                        continue
+                    if set(s.get("title", "").lower().split()) & _ROADMAP_KEYWORDS:
+                        best_idx = i
+                        break
+
+                if best_idx is not None:
+                    s = validated[best_idx]
+                    raw_bullets = s.get("bullets", [])
+                    new_bullets = []
+                    for j, b in enumerate(raw_bullets[:6]):
+                        new_bullets.append(b if ":" in b else f"Phase {j + 1}: {b}")
+                    while len(new_bullets) < 3:
+                        new_bullets.append(f"Phase {len(new_bullets) + 1}: Key milestone")
+                    validated[best_idx] = {**s, "layout": "timeline", "bullets": new_bullets}
+                else:
+                    insert_at = min(2, len(validated))
+                    validated.insert(insert_at, {
+                        "layout": "timeline",
+                        "title": "Project Roadmap",
+                        "bullets": [
+                            "Phase 1: Research & Planning",
+                            "Phase 2: Development & Build",
+                            "Phase 3: Testing & Launch",
+                        ],
+                        "speaker_notes": "Key phases and milestones for the project.",
+                        "color_scheme": "default",
+                        "shape_style": "square",
+                    })
+
         validated.append({
             "layout": "hero",
             "title": "Thank You",
