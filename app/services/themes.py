@@ -46,6 +46,15 @@ THEMES: dict[str, Theme] = {
         "forest_pro", "Forest Pro", "#04321E", "#FFFFFF", "#34D399",
         bg_image="forest_pro_bg.png",
     ),
+    "midnight_black": Theme(
+        "midnight_black", "Midnight", "#0A0A0A", "#FFFFFF", "#EAB308",
+    ),
+    "burgundy_suit": Theme(
+        "burgundy_suit", "Burgundy", "#2D0A0A", "#FFFFFF", "#F87171",
+    ),
+    "prussian_blue": Theme(
+        "prussian_blue", "Prussian Blue", "#001F3F", "#FFFFFF", "#7DD3FC",
+    ),
     # ── Creative ──────────────────────────────────────────────────────────────
     "vivid_purple": Theme(
         "vivid_purple", "Vivid Purple", "#150228", "#FFFFFF", "#A855F7",
@@ -71,6 +80,15 @@ THEMES: dict[str, Theme] = {
         "cosmic_indigo", "Cosmic Indigo", "#000818", "#FFFFFF", "#818CF8",
         bg_image="cosmic_indigo_bg.png",
     ),
+    "rose_bloom": Theme(
+        "rose_bloom", "Rose Bloom", "#1A0010", "#FFFFFF", "#FB7185",
+    ),
+    "electric_lime": Theme(
+        "electric_lime", "Electric Lime", "#001A00", "#FFFFFF", "#84CC16",
+    ),
+    "aurora": Theme(
+        "aurora", "Aurora", "#06081A", "#FFFFFF", "#A78BFA",
+    ),
     # ── Minimal ───────────────────────────────────────────────────────────────
     "pure_white": Theme(
         "pure_white", "Pure White", "#FFFFFF", "#1F2937", "#3B82F6",
@@ -95,6 +113,15 @@ THEMES: dict[str, Theme] = {
     "warm_slate": Theme(
         "warm_slate", "Warm Slate", "#F4F6F8", "#334155", "#64748B",
         bg_image="warm_slate_bg.png",
+    ),
+    "blush_rose": Theme(
+        "blush_rose", "Blush Rose", "#FFF0F3", "#881337", "#E11D48",
+    ),
+    "arctic_sky": Theme(
+        "arctic_sky", "Arctic Sky", "#F0F9FF", "#0C4A6E", "#0284C7",
+    ),
+    "mint_fresh": Theme(
+        "mint_fresh", "Mint Fresh", "#F0FFF4", "#14532D", "#15803D",
     ),
 }
 
