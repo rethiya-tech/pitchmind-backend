@@ -479,6 +479,7 @@ async def reorder_slides(
             ),
             {"pos": i, "id": str(slide_id), "cid": str(cid)},
         )
+    await db.commit()
     return {"success": True}
 
 

@@ -17,9 +17,16 @@ app = FastAPI(
     redoc_url=None,
 )
 
+_origins = (
+    [settings.FRONTEND_URL]
+    if settings.ENVIRONMENT != "development"
+    else [settings.FRONTEND_URL, "http://localhost:5173", "http://localhost:5174"]
+)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[settings.FRONTEND_URL],
+    allow_origins=_origins,
+    allow_origin_regex=r"http://localhost:\d+" if settings.ENVIRONMENT == "development" else None,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

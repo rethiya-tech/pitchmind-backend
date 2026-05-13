@@ -2,9 +2,10 @@
 
 ## Stack
 Python 3.12, FastAPI async, PostgreSQL 15, SQLAlchemy 2.x async,
-asyncpg, Alembic, Redis (Upstash), anthropic SDK (claude-sonnet-4),
-python-pptx, pdfplumber, python-docx, pymupdf, markdown-it-py,
-PyJWT, bcrypt, slowapi, google-cloud-storage, Jinja2, tenacity
+asyncpg, Alembic, Redis (Upstash), anthropic SDK (claude-sonnet-4-5),
+google-genai SDK (gemini-2.5-flash), python-pptx, pdfplumber,
+python-docx, pymupdf, markdown-it-py, PyJWT, bcrypt, slowapi,
+google-cloud-storage, Jinja2, tenacity
 
 ## Application Architecture
 
@@ -43,11 +44,11 @@ app/
 │   ├── admin.py
 │   └── templates.py
 └── services/
-    ├── claude.py            # Claude API + stub slides for dev
+    ├── claude.py            # Gemini 2.5 Flash + Claude Sonnet + stub slides for dev
     ├── gcs.py               # GCS + local dev fallback
     ├── parser.py            # PDF, DOCX, PPTX, Markdown parsing
     ├── pptx_builder.py      # python-pptx PPTX generation
-    ├── themes.py            # Theme definitions and styling
+    ├── themes.py            # 18 Theme definitions and styling
     └── audit.py             # log_event() helper
 ```
 
@@ -128,13 +129,15 @@ class Slide(Base):
 `pending` → `generating` → `done` | `failed` | `cancelled`
 
 ## Conversion Pipeline
-1. Client `POST /conversions` with `upload_id` OR `prompt_text`
+1. Client `POST /conversions` with `upload_id` OR `prompt_text` (+ optional `presentation_flags`)
 2. If upload: parse document text via `services/parser.py`
-3. Build system prompt via `services/claude.build_system_prompt()`
-4. Call Claude API (with retry) → returns `{"slides": [...]}` JSON
-5. Each slide saved to `slides` table with `color_scheme` + `shape_style`
-6. Frontend streams progress via `GET /conversions/{id}/stream` (SSE)
-7. Export: `POST /conversions/{id}/export` → `pptx_builder` → GCS or local
+3. Build system prompt via `services/claude.build_system_prompt()` (injects flag instructions)
+4. Call AI (Gemini 2.5 Flash preferred, Claude Sonnet fallback, stub if no key) → `{"slides": [...]}` JSON
+5. Post-process: `validate_slides()` enforces per-layout bullet rules
+6. Post-process: roadmap flag enforcement — guarantees a `timeline` slide exists
+7. Each slide saved to `slides` table with `color_scheme` + `shape_style`
+8. Frontend streams progress via `GET /conversions/{id}/stream` (SSE)
+9. Export: `POST /conversions/{id}/export` → `pptx_builder` → GCS or local
 
 ### Prompt-only mode (no file upload)
 ```python
@@ -149,9 +152,41 @@ else:
 
 ### Stub slides for dev (no API key)
 `services/claude._stub_slides()` returns a 10-slide pitch deck when
-`ANTHROPIC_API_KEY` is unset. Every stub slide includes `color_scheme`
-and `shape_style` fields. Two-column slides use `## Header` prefix on
-bullets to denote column splits.
+neither `GEMINI_API_KEY` nor a real `ANTHROPIC_API_KEY` is set. Every
+stub slide includes `color_scheme` and `shape_style` fields. Two-column
+slides use `## Header` prefix on bullets to denote column splits.
+
+### Presentation flags (`presentation_flags`)
+Optional list of strings sent with `POST /conversions`. Each flag injects
+extra instructions into the system prompt AND triggers server-side enforcement:
+
+| Flag | Prompt instruction | Server enforcement |
+|------|-------------------|--------------------|
+| `minimal` | Max 3 bullets, prefer hero/bullets layouts | None (soft prompt only) |
+| `roadmap` | Include exactly one `timeline` slide | Post-process: if no timeline slide, convert best matching slide or insert one at position 2 |
+| `data_focus` | Prefer `big_stat`/`data_table` layouts | None (soft prompt only) |
+
+Roadmap enforcement logic (in `conversions.py _generate_slides_task()`):
+1. Check if any slide has `layout == "timeline"` after `validate_slides()`
+2. If not, scan slide titles for roadmap keywords; convert matching slide to timeline with `"Phase N: ..."` bullets
+3. If no keyword match found, insert a default 3-phase timeline slide at position 2
+
+### AI provider selection (priority order)
+1. **Gemini 2.5 Flash** — used when `GEMINI_API_KEY` is set (primary provider)
+   - `thinking_budget=0` disables thinking tokens for reliable JSON output
+   - Text extraction falls back through `.text` → `.candidates[0].content.parts[0].text`
+   - JSON scanned with `text.find("{")` + `json.JSONDecoder().raw_decode()` to handle surrounding text
+2. **Claude Sonnet 4.5** — used when a valid `ANTHROPIC_API_KEY` is set (`sk-ant-...` prefix)
+3. **Stub slides** — used in dev when neither key is present
+
+### Themes (18 total in `services/themes.py`)
+Valid theme IDs — **do not use any other ID as default or fallback**:
+```
+Professional: clean_slate, navy_gold, dark_tech, charcoal_amber, steel_blue, forest_pro
+Creative:     vivid_purple, sunset_orange, ocean_teal, neon_blue, ruby_red, cosmic_indigo
+Minimal:      pure_white, warm_ivory, soft_grey, light_pearl, sage_mist, warm_slate
+```
+Default/fallback theme is always `"clean_slate"`. `"executive_gold"` does NOT exist.
 
 ## FastAPI conventions
 - All route handlers: `async def`
@@ -222,29 +257,49 @@ sa.text("SELECT * FROM t WHERE data::jsonb @> :val")
 sa.text("SELECT * FROM t WHERE CAST(data AS jsonb) @> :val")
 ```
 
-## Claude API pattern (use tenacity for retry)
+## AI API patterns (use tenacity for retry)
+
+### Gemini 2.5 Flash (primary)
+```python
+from google import genai
+from google.genai import types
+
+client = genai.Client(api_key=settings.GEMINI_API_KEY)
+response = await client.aio.models.generate_content(
+    model="gemini-2.5-flash",
+    contents=user_message,
+    config=types.GenerateContentConfig(
+        system_instruction=system,
+        max_output_tokens=8192,
+        thinking_config=types.ThinkingConfig(thinking_budget=0),  # required for JSON reliability
+    ),
+)
+# Safe text extraction — .text can throw on thinking models
+text = None
+try:
+    text = response.text
+except Exception:
+    pass
+if not text:
+    text = response.candidates[0].content.parts[0].text
+text = strip_fences(text.strip())
+start = text.find("{")
+result, _ = json.JSONDecoder().raw_decode(text, start)  # handles surrounding text
+```
+
+### Claude Sonnet 4.5 (fallback)
 ```python
 from anthropic import AsyncAnthropic
-from tenacity import retry, stop_after_attempt, wait_exponential
-import json
 
 client = AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
-
-@retry(stop=stop_after_attempt(3),
-       wait=wait_exponential(multiplier=1, min=2, max=8))
-async def call_claude(system: str, user_message: str) -> dict:
-    response = await client.messages.create(
-        model="claude-sonnet-4",
-        max_tokens=4096,
-        system=system,
-        messages=[{"role": "user", "content": user_message}]
-    )
-    text = response.content[0].text.strip()
-    # Always strip markdown fences
-    if text.startswith("```"):
-        text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
-    result = json.loads(text)
-    return result, response.usage.input_tokens + response.usage.output_tokens
+response = await client.messages.create(
+    model="claude-sonnet-4-5",
+    max_tokens=8192,
+    system=system,
+    messages=[{"role": "user", "content": user_message}]
+)
+text = strip_fences(response.content[0].text.strip())
+result = json.loads(text)
 ```
 
 ## GCS service pattern
@@ -330,7 +385,11 @@ async def stream(id: str, token: str, db=Depends(get_db)):
 ```env
 DATABASE_URL=postgresql+asyncpg://user:pass@localhost:5432/pitchmind
 REDIS_URL=redis://localhost:6379
-ANTHROPIC_API_KEY=sk-ant-...          # omit to use stub slides in dev
+
+# AI provider — set one (Gemini takes priority over Anthropic)
+GEMINI_API_KEY=AIza...                 # preferred; enables Gemini 2.5 Flash
+ANTHROPIC_API_KEY=sk-ant-...          # fallback; omit both to use stub slides in dev
+
 JWT_SECRET=your_secret_here
 JWT_ACCESS_EXPIRE_MINUTES=30
 JWT_REFRESH_EXPIRE_DAYS=30
