@@ -21,8 +21,67 @@ router = APIRouter(prefix="/templates", tags=["templates"])
 
 ALLOWED_MIME = {
     "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-    "application/vnd.ms-powerpoint",
 }
+
+# Old binary .ppt format — accepted by some browsers under this MIME type but
+# python-pptx cannot parse it; reject early with a clear message.
+LEGACY_PPT_MIME = {"application/vnd.ms-powerpoint"}
+
+
+_DRAWINGML_NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
+# Placeholder indices that represent a slide title
+_TITLE_PH_IDX = {0, 13}  # 0=title, 13=center title (common on title slides)
+
+
+def _extract_shape_texts(shape) -> list[tuple[bool, str]]:
+    """Recursively extract (is_title_placeholder, text) from a shape and its children.
+
+    Handles grouped shapes, tables, regular text frames, and SmartArt/complex
+    shapes via XML fallback.  Returns a flat list of (is_title, text) tuples.
+    """
+    results: list[tuple[bool, str]] = []
+    try:
+        # Grouped shape — recurse into children
+        if shape.shape_type == 6:  # MSO_SHAPE_TYPE.GROUP == 6
+            for child in shape.shapes:
+                results.extend(_extract_shape_texts(child))
+            return results
+
+        # Table — read every cell
+        if shape.has_table:
+            for row in shape.table.rows:
+                for cell in row.cells:
+                    text = cell.text_frame.text.strip()
+                    if text:
+                        results.append((False, text))
+            return results
+
+        # Regular text frame
+        if shape.has_text_frame:
+            text = shape.text_frame.text.strip()
+            if not text:
+                return results
+            is_title = (
+                hasattr(shape, "placeholder_format")
+                and shape.placeholder_format is not None
+                and shape.placeholder_format.idx in _TITLE_PH_IDX
+            )
+            results.append((is_title, text))
+            return results
+
+        # Fallback: pull <a:t> text runs directly from XML for SmartArt,
+        # charts, and other shapes that don't expose has_text_frame.
+        raw_texts = [
+            el.text for el in shape.element.iter(f"{{{_DRAWINGML_NS}}}t")
+            if el.text and el.text.strip()
+        ]
+        if raw_texts:
+            combined = " ".join(raw_texts).strip()
+            if combined:
+                results.append((False, combined))
+    except Exception:
+        pass
+    return results
 
 
 def _parse_pptx_slides(file_bytes: bytes) -> tuple[list[dict], str | None]:
@@ -30,10 +89,8 @@ def _parse_pptx_slides(file_bytes: bytes) -> tuple[list[dict], str | None]:
     Returns (slides, warning_message). On parse failure returns ([], error_str)."""
     try:
         from pptx import Presentation
-        from pptx.enum.shapes import PP_PLACEHOLDER
         prs = Presentation(io.BytesIO(file_bytes))
 
-        # Get slide count from XML directly — reliable even for exotic PPTX
         try:
             raw_count = len(prs.slides._sldIdLst)
         except Exception:
@@ -45,32 +102,21 @@ def _parse_pptx_slides(file_bytes: bytes) -> tuple[list[dict], str | None]:
         for i in range(raw_count):
             title = ""
             bullets: list[str] = []
+            notes = ""
             try:
                 slide = prs.slides[i]
+
                 for shape in slide.shapes:
-                    try:
-                        if not shape.has_text_frame:
-                            continue
-                        text = shape.text_frame.text.strip()
-                        if not text:
-                            continue
-                        # Detect title placeholder (idx=0 only)
-                        is_title = (
-                            hasattr(shape, "placeholder_format")
-                            and shape.placeholder_format is not None
-                            and shape.placeholder_format.idx == 0
-                        )
-                        if is_title and not title:
+                    for is_title_ph, text in _extract_shape_texts(shape):
+                        if is_title_ph and not title:
                             title = text
                         else:
-                            for para in shape.text_frame.paragraphs:
-                                line = para.text.strip()
-                                if line and line != title:
+                            # Split multi-line text blocks into individual bullet lines
+                            for line in text.splitlines():
+                                line = line.strip()
+                                if line and line != title and line not in bullets:
                                     bullets.append(line)
-                    except Exception:
-                        continue
-                # Speaker notes
-                notes = ""
+
                 try:
                     if slide.has_notes_slide:
                         notes = slide.notes_slide.notes_text_frame.text.strip()
@@ -84,7 +130,7 @@ def _parse_pptx_slides(file_bytes: bytes) -> tuple[list[dict], str | None]:
                 "layout": "bullets",
                 "title": title or f"Slide {i + 1}",
                 "bullets": bullets[:8],
-                "speaker_notes": notes if 'notes' in dir() else "",
+                "speaker_notes": notes,
             })
 
         warning = f"Some slides had parse errors: {'; '.join(parse_errors)}" if parse_errors else None
@@ -104,7 +150,10 @@ async def upload_template(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if file.content_type not in ALLOWED_MIME and not (file.filename or "").endswith(".pptx"):
+    filename = file.filename or ""
+    if file.content_type in LEGACY_PPT_MIME or filename.lower().endswith(".ppt") and not filename.lower().endswith(".pptx"):
+        raise HTTPException(status_code=415, detail={"code": "LEGACY_FORMAT", "message": "Old .ppt format is not supported. Please convert to .pptx in PowerPoint or Google Slides and re-upload."})
+    if file.content_type not in ALLOWED_MIME and not filename.endswith(".pptx"):
         raise HTTPException(status_code=415, detail={"code": "INVALID_TYPE", "message": "Only .pptx files are accepted"})
 
     file_bytes = await file.read()
@@ -267,6 +316,44 @@ async def copy_template(
     await db.commit()
 
     return TemplateCopyResponse(conversion_id=conv_id, slide_count=slide_count)
+
+
+# ── Re-parse slides from stored PPTX (admin only) ─────────────────────────────
+
+@router.patch("/{template_id}/reparse", response_model=TemplateOut)
+async def reparse_template(
+    template_id: str,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    try:
+        tid = uuid.UUID(template_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Template not found"})
+
+    t = await db.get(Template, tid)
+    if not t or not t.is_active:
+        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Template not found"})
+
+    file_bytes = _gcs.read_pptx_key_bytes(t.pptx_key)
+    if not file_bytes:
+        raise HTTPException(status_code=422, detail={"code": "FILE_NOT_FOUND", "message": "Stored PPTX file could not be retrieved"})
+
+    slides, parse_warning = _parse_pptx_slides(file_bytes)
+
+    await db.execute(
+        sa.text("UPDATE templates SET slides_json = CAST(:slides AS jsonb), slide_count = :count WHERE id = :id"),
+        {"slides": json.dumps(slides), "count": len(slides), "id": str(tid)},
+    )
+    await log_event(db, "template.reparsed", actor_id=admin.id, target_type="template", target_id=tid,
+                    metadata={"name": t.name, "slides": len(slides)})
+    await db.commit()
+    await db.refresh(t)
+
+    out = TemplateOut.model_validate(t)
+    if parse_warning:
+        out.parse_warning = f"Slides could not be fully extracted ({parse_warning})."
+    return out
 
 
 # ── Delete a template (admin: any; user: only their own private templates) ─────

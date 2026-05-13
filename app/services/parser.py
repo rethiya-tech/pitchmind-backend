@@ -206,6 +206,53 @@ def parse_text(text: str) -> ParsedDocument:
     ))
 
 
+_DRAWINGML_NS_P = "http://schemas.openxmlformats.org/drawingml/2006/main"
+_TITLE_PH_IDX_P = {0, 13}  # 0=title, 13=center title
+
+
+def _extract_slide_texts(shape) -> list[tuple[bool, str]]:
+    """Return (is_title, text) pairs from a shape, recursing into groups."""
+    results: list[tuple[bool, str]] = []
+    try:
+        if shape.shape_type == 6:  # GROUP
+            for child in shape.shapes:
+                results.extend(_extract_slide_texts(child))
+            return results
+
+        if shape.has_table:
+            for row in shape.table.rows:
+                for cell in row.cells:
+                    text = cell.text_frame.text.strip()
+                    if text:
+                        results.append((False, text))
+            return results
+
+        if shape.has_text_frame:
+            text = shape.text_frame.text.strip()
+            if not text:
+                return results
+            is_title = (
+                hasattr(shape, "placeholder_format")
+                and shape.placeholder_format is not None
+                and shape.placeholder_format.idx in _TITLE_PH_IDX_P
+            )
+            results.append((is_title, text))
+            return results
+
+        # XML fallback for SmartArt, charts, and other complex shapes
+        raw_texts = [
+            el.text for el in shape.element.iter(f"{{{_DRAWINGML_NS_P}}}t")
+            if el.text and el.text.strip()
+        ]
+        if raw_texts:
+            combined = " ".join(raw_texts).strip()
+            if combined:
+                results.append((False, combined))
+    except Exception:
+        pass
+    return results
+
+
 def parse_pptx(data: bytes) -> ParsedDocument:
     import io as _io
     from pptx import Presentation
@@ -229,28 +276,14 @@ def parse_pptx(data: bytes) -> ParsedDocument:
         slide_bullets: list[str] = []
 
         for shape in slide.shapes:
-            try:
-                if not shape.has_text_frame:
-                    continue
-                # Check if this shape is a title placeholder
-                is_title_ph = False
-                if hasattr(shape, "placeholder_format") and shape.placeholder_format is not None:
-                    ph_idx = shape.placeholder_format.idx
-                    is_title_ph = ph_idx == 0  # only idx=0 is title
-
-                text = shape.text_frame.text.strip()
-                if not text:
-                    continue
-
+            for is_title_ph, text in _extract_slide_texts(shape):
                 if is_title_ph and not slide_title:
                     slide_title = text
                 else:
-                    for para in shape.text_frame.paragraphs:
-                        line = para.text.strip()
+                    for para_line in text.splitlines():
+                        line = para_line.strip()
                         if line and line != slide_title:
                             slide_bullets.append(line)
-            except Exception:
-                continue
 
         # Speaker notes as extra context
         try:
