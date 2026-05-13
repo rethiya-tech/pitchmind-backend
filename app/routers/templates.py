@@ -7,6 +7,7 @@ import sqlalchemy as sa
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.dependencies.auth import get_current_user, require_admin
 from app.dependencies.db import get_db
 from app.models.conversion import Conversion
@@ -91,21 +92,14 @@ def _parse_pptx_slides(file_bytes: bytes) -> tuple[list[dict], str | None]:
         from pptx import Presentation
         prs = Presentation(io.BytesIO(file_bytes))
 
-        try:
-            raw_count = len(prs.slides._sldIdLst)
-        except Exception:
-            raw_count = 0
-
         slides = []
         parse_errors = []
 
-        for i in range(raw_count):
+        for i, slide in enumerate(prs.slides):
             title = ""
             bullets: list[str] = []
             notes = ""
             try:
-                slide = prs.slides[i]
-
                 for shape in slide.shapes:
                     for is_title_ph, text in _extract_shape_texts(shape):
                         if is_title_ph and not title:
@@ -166,7 +160,8 @@ async def upload_template(
     gcs_key = f"templates/{template_id}.pptx"
 
     if _gcs.is_configured():
-        _gcs.upload_bytes(gcs_key, file_bytes, content_type="application/vnd.openxmlformats-officedocument.presentationml.presentation")
+        settings = get_settings()
+        _gcs.upload_bytes(settings.GCS_BUCKET, gcs_key, file_bytes, content_type="application/vnd.openxmlformats-officedocument.presentationml.presentation")
     else:
         local_path = _gcs.LOCAL_UPLOAD_DIR / f"template_{template_id}.pptx"
         _gcs.LOCAL_UPLOAD_DIR.mkdir(exist_ok=True)

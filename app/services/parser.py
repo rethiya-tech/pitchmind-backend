@@ -261,29 +261,22 @@ def parse_pptx(data: bytes) -> ParsedDocument:
     sections: list[Section] = []
     all_text: list[str] = []
 
-    try:
-        raw_count = len(prs.slides._sldIdLst)
-    except Exception:
-        raw_count = len(prs.slides)
-
-    for i in range(raw_count):
-        try:
-            slide = prs.slides[i]
-        except Exception:
-            continue
-
+    for i, slide in enumerate(prs.slides):
         slide_title = ""
         slide_bullets: list[str] = []
 
-        for shape in slide.shapes:
-            for is_title_ph, text in _extract_slide_texts(shape):
-                if is_title_ph and not slide_title:
-                    slide_title = text
-                else:
-                    for para_line in text.splitlines():
-                        line = para_line.strip()
-                        if line and line != slide_title:
-                            slide_bullets.append(line)
+        try:
+            for shape in slide.shapes:
+                for is_title_ph, text in _extract_slide_texts(shape):
+                    if is_title_ph and not slide_title:
+                        slide_title = text
+                    else:
+                        for para_line in text.splitlines():
+                            line = para_line.strip()
+                            if line and line != slide_title:
+                                slide_bullets.append(line)
+        except Exception:
+            pass
 
         # Speaker notes as extra context
         try:
