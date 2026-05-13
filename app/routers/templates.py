@@ -62,11 +62,11 @@ def _extract_shape_texts(shape) -> list[tuple[bool, str]]:
             text = shape.text_frame.text.strip()
             if not text:
                 return results
-            is_title = (
-                hasattr(shape, "placeholder_format")
-                and shape.placeholder_format is not None
-                and shape.placeholder_format.idx in _TITLE_PH_IDX
-            )
+            try:
+                ph = shape.placeholder_format
+                is_title = ph is not None and ph.idx in _TITLE_PH_IDX
+            except Exception:
+                is_title = False
             results.append((is_title, text))
             return results
 
