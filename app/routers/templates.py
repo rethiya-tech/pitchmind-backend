@@ -90,7 +90,17 @@ def _parse_pptx_slides(file_bytes: bytes) -> tuple[list[dict], str | None]:
     Returns (slides, warning_message). On parse failure returns ([], error_str)."""
     try:
         from pptx import Presentation
-        prs = Presentation(io.BytesIO(file_bytes))
+        try:
+            prs = Presentation(io.BytesIO(file_bytes))
+        except ValueError as e:
+            msg = str(e)
+            if "themeManager" in msg or "not a PowerPoint file" in msg:
+                return [], (
+                    "This file is a PowerPoint Theme (.thmx) saved with a .pptx extension — "
+                    "it contains no slides. Please open the original presentation in PowerPoint "
+                    "or Google Slides and export/save it as a proper .pptx file."
+                )
+            raise
 
         slides = []
         parse_errors = []
