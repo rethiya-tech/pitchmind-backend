@@ -112,9 +112,27 @@ def _clear_textbox_border(tb: Any) -> None:
         etree.SubElement(ln, qn("a:noFill"))
 
 
+def _apply_run_style(run: Any, style: dict, default_color: str,
+                     default_font: str, default_size: int, default_bold: bool) -> None:
+    """Apply a text_styles entry to a run, falling back to provided defaults."""
+    color = style.get("color") or default_color
+    font_name = style.get("fontFamily") or default_font
+    size = style.get("fontSize") or default_size
+    weight = style.get("fontWeight")
+    bold = (weight >= 600) if weight is not None else default_bold
+    italic = bool(style.get("italic"))
+
+    run.font.size = Pt(size)
+    run.font.bold = bold
+    run.font.italic = italic
+    run.font.color.rgb = _rgb(color)
+    run.font.name = font_name
+
+
 def _add_textbox(slide: Any, text: str, x: int, y: int, w: int, h: int,
                  size_pt: int, bold: bool, hex_color: str,
-                 font: str = "Plus Jakarta Sans") -> None:
+                 font: str = "Plus Jakarta Sans",
+                 style: dict | None = None) -> None:
     tb = slide.shapes.add_textbox(Emu(x), Emu(y), Emu(w), Emu(h))
     _clear_textbox_border(tb)
 
@@ -123,10 +141,13 @@ def _add_textbox(slide: Any, text: str, x: int, y: int, w: int, h: int,
     p = tf.paragraphs[0]
     p.text = text
     run = p.runs[0] if p.runs else p.add_run()
-    run.font.size = Pt(size_pt)
-    run.font.bold = bold
-    run.font.color.rgb = _rgb(hex_color)
-    run.font.name = font
+    if style:
+        _apply_run_style(run, style, hex_color, font, size_pt, bold)
+    else:
+        run.font.size = Pt(size_pt)
+        run.font.bold = bold
+        run.font.color.rgb = _rgb(hex_color)
+        run.font.name = font
 
 
 def _lighter(hex_color: str, amount: int = 30) -> str:
@@ -161,13 +182,21 @@ def _add_ellipse(slide: Any, x: int, y: int, w: int, h: int,
 
 
 def _add_bullet_column(sl: Any, bullets: list[str], x: int, y: int, w: int, h: int,
-                       theme: Any, font: str = "Plus Jakarta Sans") -> None:
-    """Add a column of bullet points as a textbox."""
+                       theme: Any, font: str = "Plus Jakarta Sans",
+                       bullet_styles: dict | None = None,
+                       bullet_offset: int = 0) -> None:
+    """Add a column of bullet points as a textbox.
+
+    bullet_styles: dict keyed by str(absolute_bullet_index) → SlideTextStyle dict
+    bullet_offset: index of first bullet in this column (for two_column layouts)
+    """
     cb = sl.shapes.add_textbox(Emu(x), Emu(y), Emu(w), Emu(h))
     _clear_textbox_border(cb)
     ctf = cb.text_frame
     ctf.word_wrap = True
+    styles = bullet_styles or {}
     for j, bullet in enumerate(bullets):
+        abs_idx = j + bullet_offset
         cp = ctf.paragraphs[0] if j == 0 else ctf.add_paragraph()
         dot = cp.add_run()
         dot.text = "● "
@@ -176,9 +205,13 @@ def _add_bullet_column(sl: Any, bullets: list[str], x: int, y: int, w: int, h: i
         dot.font.name = font
         txt = cp.add_run()
         txt.text = bullet
-        txt.font.size = Pt(13)
-        txt.font.color.rgb = _rgb(theme.text)
-        txt.font.name = font
+        bstyle = styles.get(str(abs_idx))
+        if bstyle:
+            _apply_run_style(txt, bstyle, theme.text, font, 13, False)
+        else:
+            txt.font.size = Pt(13)
+            txt.font.color.rgb = _rgb(theme.text)
+            txt.font.name = font
 
 
 # ── layout renderers ──────────────────────────────────────────────────────────
@@ -199,13 +232,17 @@ def _render_common_footer(sl: Any, theme: Any, sid: int) -> None:
 
 
 def _render_hero(sl: Any, slide: Any, theme: Any, sid: int) -> None:
+    ts = getattr(slide, 'text_styles', None) or {}
     _add_textbox(sl, slide.title or "", TITLE_X, 1300000, TITLE_W, 1600000,
-                 size_pt=38, bold=True, hex_color=theme.text)
+                 size_pt=38, bold=True, hex_color=theme.text,
+                 style=ts.get('title'))
     _add_solid_rect(sl, TITLE_X, 3000000, DIVIDER_W * 2, DIVIDER_H * 2, theme.accent, sid)
     subtitle = slide.bullets[0] if slide.bullets else ""
     if subtitle:
+        bullet_styles = ts.get('bullets') or {}
         _add_textbox(sl, subtitle, TITLE_X, 3200000, TITLE_W, 700000,
-                     size_pt=18, bold=False, hex_color=theme.text)
+                     size_pt=18, bold=False, hex_color=theme.text,
+                     style=bullet_styles.get('0'))
     if slide.speaker_notes:
         sl.notes_slide.notes_text_frame.text = slide.speaker_notes
 
@@ -219,19 +256,24 @@ _NH_BULLETS_H = 3200000  # to ~96%
 
 
 def _render_bullets(sl: Any, slide: Any, theme: Any, sid: int, slide_idx: int) -> None:
+    ts = getattr(slide, 'text_styles', None) or {}
     _add_textbox(sl, slide.title or "", TITLE_X, _NH_TITLE_Y, TITLE_W, _NH_TITLE_H,
-                 size_pt=28, bold=True, hex_color=theme.text)
+                 size_pt=28, bold=True, hex_color=theme.text,
+                 style=ts.get('title'))
     _add_solid_rect(sl, TITLE_X, _NH_DIVIDER_Y, DIVIDER_W, DIVIDER_H, theme.accent, sid)
     bullets = slide.bullets if slide.bullets else []
     if bullets:
-        _add_bullet_column(sl, bullets, TITLE_X, _NH_BULLETS_Y, TITLE_W, _NH_BULLETS_H, theme)
+        _add_bullet_column(sl, bullets, TITLE_X, _NH_BULLETS_Y, TITLE_W, _NH_BULLETS_H,
+                           theme, bullet_styles=ts.get('bullets'))
     if slide.speaker_notes:
         sl.notes_slide.notes_text_frame.text = slide.speaker_notes
 
 
 def _render_two_column(sl: Any, slide: Any, theme: Any, sid: int, slide_idx: int) -> None:
+    ts = getattr(slide, 'text_styles', None) or {}
     _add_textbox(sl, slide.title or "", TITLE_X, _NH_TITLE_Y, TITLE_W, _NH_TITLE_H,
-                 size_pt=24, bold=True, hex_color=theme.text)
+                 size_pt=24, bold=True, hex_color=theme.text,
+                 style=ts.get('title'))
     _add_solid_rect(sl, TITLE_X, _NH_DIVIDER_Y, DIVIDER_W, DIVIDER_H, theme.accent, sid)
 
     bullets = slide.bullets if slide.bullets else []
@@ -255,10 +297,13 @@ def _render_two_column(sl: Any, slide: Any, theme: Any, sid: int, slide_idx: int
     _add_textbox(sl, "Details", right_x + 80000, _NH_BULLETS_Y, col_w - 160000, col_hdr_h,
                  size_pt=9, bold=True, hex_color="#FFFFFF")
 
+    bullet_styles = ts.get('bullets')
     if left_bullets:
-        _add_bullet_column(sl, left_bullets, TITLE_X, col_content_y, col_w, col_content_h, theme)
+        _add_bullet_column(sl, left_bullets, TITLE_X, col_content_y, col_w, col_content_h,
+                           theme, bullet_styles=bullet_styles, bullet_offset=0)
     if right_bullets:
-        _add_bullet_column(sl, right_bullets, right_x, col_content_y, col_w, col_content_h, theme)
+        _add_bullet_column(sl, right_bullets, right_x, col_content_y, col_w, col_content_h,
+                           theme, bullet_styles=bullet_styles, bullet_offset=mid)
 
     if slide.speaker_notes:
         sl.notes_slide.notes_text_frame.text = slide.speaker_notes
