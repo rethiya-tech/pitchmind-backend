@@ -83,10 +83,12 @@ class SlideOut(BaseModel):
     layout: str
     title: str | None
     bullets: list[str]
+    text_styles: dict = {}
     speaker_notes: str | None
     is_deleted: bool
     color_scheme: str = "default"
     shape_style: str = "square"
+    background_image_url: str | None = None
     updated_at: datetime
 
     model_config = {"from_attributes": True}
