@@ -179,12 +179,15 @@ Roadmap enforcement logic (in `conversions.py _generate_slides_task()`):
 2. **Claude Sonnet 4.5** — used when a valid `ANTHROPIC_API_KEY` is set (`sk-ant-...` prefix)
 3. **Stub slides** — used in dev when neither key is present
 
-### Themes (18 total in `services/themes.py`)
+### Themes (27 total in `services/themes.py`)
 Valid theme IDs — **do not use any other ID as default or fallback**:
 ```
-Professional: clean_slate, navy_gold, dark_tech, charcoal_amber, steel_blue, forest_pro
-Creative:     vivid_purple, sunset_orange, ocean_teal, neon_blue, ruby_red, cosmic_indigo
-Minimal:      pure_white, warm_ivory, soft_grey, light_pearl, sage_mist, warm_slate
+Professional: clean_slate, navy_gold, dark_tech, charcoal_amber, steel_blue, forest_pro,
+              midnight_black, burgundy_suit, prussian_blue
+Creative:     vivid_purple, sunset_orange, ocean_teal, neon_blue, ruby_red, cosmic_indigo,
+              rose_bloom, electric_lime, aurora
+Minimal:      pure_white, warm_ivory, soft_grey, light_pearl, sage_mist, warm_slate,
+              blush_rose, arctic_sky, mint_fresh
 ```
 Default/fallback theme is always `"clean_slate"`. `"executive_gold"` does NOT exist.
 
